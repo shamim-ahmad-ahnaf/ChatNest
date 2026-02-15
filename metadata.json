@@ -1,0 +1,8 @@
+{
+  "name": "ChatNest",
+  "description": "A premium, secure, and intelligent nest for all your conversations with AI integration.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
