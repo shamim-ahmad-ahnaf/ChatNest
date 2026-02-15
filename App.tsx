@@ -11,7 +11,8 @@ import {
     Zap, VideoOff, Plus, Edit3, CameraIcon, Image as ImageIcon,
     Info, LogOut as LeaveIcon, ShieldCheck, UserMinus, Settings2,
     Clock, SearchIcon, Moon, Sun, Layout, FileText, Loader2, ExternalLink,
-    PlusCircle, Maximize2, Volume2, VolumeX, Mic2, Upload, UserPlus, UserSearch
+    PlusCircle, Maximize2, Volume2, VolumeX, Mic2, Upload, UserPlus, UserSearch,
+    UserPlus2
 } from 'lucide-react';
 
 const THEME_COLORS = [
@@ -42,8 +43,13 @@ export default function App() {
   const [isTyping, setIsTyping] = useState(false);
   const [activeTab, setActiveTab] = useState<'chats' | 'contacts'>('chats');
   const [showSettings, setShowSettings] = useState(false);
+  const [showManualAdd, setShowManualAdd] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [globalUsers, setGlobalUsers] = useState<UserProfile[]>([]);
+  
+  // Manual Add States
+  const [manualName, setManualName] = useState('');
+  const [manualPhone, setManualPhone] = useState('');
   
   const [hasApiKey, setHasApiKey] = useState(true);
   const [activeReactionPickerId, setActiveReactionPickerId] = useState<string | null>(null);
@@ -68,7 +74,7 @@ export default function App() {
   const activeChat = chats.find(c => c.id === activeChatId);
   const currentTheme = THEME_COLORS.find(t => t.name === themeColor) || THEME_COLORS[0];
 
-  // Logic: Search across local chats and then across all known users on server
+  // Logic: Search local chats first
   const localFiltered = searchQuery.trim() === "" 
     ? chats 
     : chats.filter(chat => 
@@ -76,11 +82,12 @@ export default function App() {
         chat.phone.includes(searchQuery)
       );
 
+  // Logic: Global users from server (excluding local chats)
   const globalFiltered = searchQuery.trim() === "" 
     ? [] 
     : globalUsers.filter(user => 
-        user.id !== myProfile?.id && // Don't show myself
-        !chats.some(c => c.id === user.id) && // Don't show if already in recent chats
+        user.id !== myProfile?.id && 
+        !chats.some(c => c.id === user.id) &&
         (user.name.toLowerCase().includes(searchQuery.toLowerCase()) || user.phone.includes(searchQuery))
       );
 
@@ -163,7 +170,27 @@ export default function App() {
     setSearchQuery('');
   };
 
-  // RTC Call Logic (Initiation & Handling)
+  const handleAddManualContact = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!manualName.trim() || !manualPhone.trim()) return;
+
+    // Create a temporary user profile
+    const manualUser: UserProfile = {
+        id: 'manual-' + Math.random().toString(36).substr(2, 9),
+        name: manualName,
+        phone: manualPhone,
+        avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${manualName}`,
+        bio: 'Manually added nestling',
+        status: 'offline'
+    };
+
+    startNewChat(manualUser);
+    setShowManualAdd(false);
+    setManualName('');
+    setManualPhone('');
+  };
+
+  // RTC Call Logic
   const initPeerConnection = () => {
     pc.current = new RTCPeerConnection({
       iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
@@ -383,7 +410,7 @@ export default function App() {
   if (!isRegistered) {
     return (
         <div className="h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-6">
-            <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-[3rem] p-10 shadow-2xl border border-slate-100 dark:border-slate-800 animate-in zoom-in-95">
+            <div className="w-full max-md bg-white dark:bg-slate-900 rounded-[3rem] p-10 shadow-2xl border border-slate-100 dark:border-slate-800 animate-in zoom-in-95">
                 <div className={`w-20 h-20 bg-orange-500 rounded-3xl flex items-center justify-center mx-auto mb-8 shadow-lg`}>
                     <Zap className="w-10 h-10 text-white" />
                 </div>
@@ -424,12 +451,17 @@ export default function App() {
 
       {/* Chat List & Search */}
       <aside className={`${activeChatId ? 'hidden md:flex' : 'flex'} w-full md:w-80 lg:w-96 flex-col border-r border-slate-100 dark:border-slate-800 bg-slate-50/30 dark:bg-slate-900/50`}>
-        <div className="p-6">
+        <div className="p-6 pb-2">
           <div className="flex items-center justify-between mb-6">
             <h1 className="text-2xl font-black">ChatNest</h1>
-            <button onClick={() => setShowSettings(true)} className="md:hidden w-10 h-10 rounded-xl overflow-hidden shadow-sm border border-white dark:border-slate-800">
-                <img src={myProfile?.avatar} className="w-full h-full object-cover" alt="" />
-            </button>
+            <div className="flex items-center gap-2">
+                <button onClick={() => setShowManualAdd(true)} className={`w-10 h-10 rounded-xl bg-${currentTheme.class}/10 text-${currentTheme.class} flex items-center justify-center hover:scale-105 active:scale-95 transition-all shadow-sm`} title="Add Contact Manually">
+                    <UserPlus2 className="w-5 h-5" />
+                </button>
+                <button onClick={() => setShowSettings(true)} className="md:hidden w-10 h-10 rounded-xl overflow-hidden shadow-sm border border-white dark:border-slate-800">
+                    <img src={myProfile?.avatar} className="w-full h-full object-cover" alt="" />
+                </button>
+            </div>
           </div>
           <div className="relative mb-6">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
@@ -456,7 +488,7 @@ export default function App() {
             )}
           </div>
 
-          {/* Section 2: Global Search (Only shows if there's a search query) */}
+          {/* Section 2: Global Search */}
           {searchQuery.trim() !== "" && (
             <div className="space-y-2 pt-4 border-t border-slate-100 dark:border-slate-800 animate-in fade-in slide-in-from-bottom-2 duration-300">
                 <div className="flex items-center justify-between px-4 mb-3">
@@ -608,6 +640,34 @@ export default function App() {
             <h2 className="text-3xl md:text-4xl font-black mb-4">Welcome to ChatNest</h2>
             <p className="max-w-md opacity-50 font-medium text-sm md:text-base">The most intelligent nest for your digital conversations. Search by name or number to find others.</p>
           </div>
+        )}
+
+        {/* Manual Add Contact Modal */}
+        {showManualAdd && (
+            <div className="fixed inset-0 z-[500] flex items-center justify-center p-6 bg-slate-950/40 backdrop-blur-md" onClick={() => setShowManualAdd(false)}>
+                <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-[3rem] p-8 shadow-2xl relative animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+                    <button onClick={() => setShowManualAdd(false)} className="absolute top-6 right-6 text-slate-400 p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-all"><X /></button>
+                    <div className={`w-14 h-14 bg-${currentTheme.class}/10 text-${currentTheme.class} rounded-2xl flex items-center justify-center mb-6`}>
+                        <UserPlus2 className="w-7 h-7" />
+                    </div>
+                    <h2 className="text-2xl font-black mb-2">Add Nestling</h2>
+                    <p className="text-xs opacity-50 font-medium mb-6 uppercase tracking-widest">Manual Contact Entry</p>
+                    
+                    <form onSubmit={handleAddManualContact} className="space-y-4">
+                        <div className="space-y-1.5">
+                            <label className="text-[10px] font-black uppercase tracking-widest opacity-40 ml-1">Full Name</label>
+                            <input value={manualName} onChange={e => setManualName(e.target.value)} type="text" placeholder="Neo Smith" className="w-full bg-slate-50 dark:bg-slate-800 p-4 rounded-2xl outline-none focus:ring-2 ring-orange-500/20 font-bold" required />
+                        </div>
+                        <div className="space-y-1.5">
+                            <label className="text-[10px] font-black uppercase tracking-widest opacity-40 ml-1">Phone Number</label>
+                            <input value={manualPhone} onChange={e => setManualPhone(e.target.value)} type="tel" placeholder="+880 1XXX XXXXXX" className="w-full bg-slate-50 dark:bg-slate-800 p-4 rounded-2xl outline-none focus:ring-2 ring-orange-500/20 font-bold" required />
+                        </div>
+                        <button type="submit" className={`w-full py-4 mt-4 bg-${currentTheme.class} text-white rounded-2xl font-black text-lg shadow-xl shadow-${currentTheme.class}/20 hover:scale-[1.02] active:scale-95 transition-all`}>
+                            Add to Nest
+                        </button>
+                    </form>
+                </div>
+            </div>
         )}
 
         {/* Call Overlay */}
