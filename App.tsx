@@ -11,7 +11,7 @@ import {
     Zap, VideoOff, Plus, Edit3, CameraIcon, Image as ImageIcon,
     Info, LogOut as LeaveIcon, ShieldCheck, UserMinus, Settings2,
     Clock, SearchIcon, Moon, Sun, Layout, FileText, Loader2, ExternalLink,
-    PlusCircle, Maximize2, Volume2, VolumeX, Mic2, Upload, UserPlus
+    PlusCircle, Maximize2, Volume2, VolumeX, Mic2, Upload, UserPlus, UserSearch
 } from 'lucide-react';
 
 const THEME_COLORS = [
@@ -68,17 +68,21 @@ export default function App() {
   const activeChat = chats.find(c => c.id === activeChatId);
   const currentTheme = THEME_COLORS.find(t => t.name === themeColor) || THEME_COLORS[0];
 
-  // Filtering local chats + discovery of global users
-  const localFiltered = chats.filter(chat => 
-    chat.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-    chat.phone.includes(searchQuery)
-  );
+  // Logic: Search across local chats and then across all known users on server
+  const localFiltered = searchQuery.trim() === "" 
+    ? chats 
+    : chats.filter(chat => 
+        chat.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+        chat.phone.includes(searchQuery)
+      );
 
-  const globalFiltered = globalUsers.filter(user => 
-    user.id !== myProfile?.id &&
-    !chats.some(c => c.id === user.id) &&
-    (user.name.toLowerCase().includes(searchQuery.toLowerCase()) || user.phone.includes(searchQuery))
-  );
+  const globalFiltered = searchQuery.trim() === "" 
+    ? [] 
+    : globalUsers.filter(user => 
+        user.id !== myProfile?.id && // Don't show myself
+        !chats.some(c => c.id === user.id) && // Don't show if already in recent chats
+        (user.name.toLowerCase().includes(searchQuery.toLowerCase()) || user.phone.includes(searchQuery))
+      );
 
   useEffect(() => {
     if (isDarkMode) document.documentElement.classList.add('dark');
@@ -159,6 +163,7 @@ export default function App() {
     setSearchQuery('');
   };
 
+  // RTC Call Logic (Initiation & Handling)
   const initPeerConnection = () => {
     pc.current = new RTCPeerConnection({
       iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
@@ -428,39 +433,62 @@ export default function App() {
           </div>
           <div className="relative mb-6">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input type="text" placeholder="Search nestlings..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-white dark:bg-slate-800 rounded-2xl py-3 pl-12 pr-4 text-sm outline-none shadow-sm focus:ring-2 ring-orange-500/10" />
+            <input type="text" placeholder="Search by name or number..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-white dark:bg-slate-800 rounded-2xl py-3 pl-12 pr-4 text-sm outline-none shadow-sm focus:ring-2 ring-orange-500/10" />
           </div>
         </div>
         
-        <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-4">
-          {/* Current Conversations */}
+        <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-6">
+          {/* Section 1: Recent / Filtered Local Chats */}
           <div className="space-y-1">
-            <label className="text-[10px] font-black uppercase tracking-[0.2em] opacity-40 ml-4 mb-2 block">Recent Chats</label>
+            <label className="text-[10px] font-black uppercase tracking-[0.2em] opacity-40 ml-4 mb-2 block">
+                {searchQuery ? 'Matches in Chats' : 'Recent Chats'}
+            </label>
             {localFiltered.length > 0 ? localFiltered.map(chat => (
                 <div key={chat.id} onClick={() => setActiveChatId(chat.id)} className={`flex items-center gap-4 p-4 cursor-pointer rounded-3xl transition-all ${activeChatId === chat.id ? 'bg-white dark:bg-slate-800 shadow-md' : 'hover:bg-white/50 dark:hover:bg-slate-800/20'}`}>
-                <img src={chat.avatar} className="w-14 h-14 rounded-2xl object-cover" alt="" />
-                <div className="flex-1 truncate">
-                    <div className="flex justify-between items-center"><h3 className="font-bold text-sm">{chat.name}</h3><span className="text-[10px] opacity-40 font-bold">{chat.lastTimestamp ? new Date(chat.lastTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</span></div>
-                    <p className="text-xs opacity-50 truncate">{chat.lastMessage || chat.phone}</p>
+                    <img src={chat.avatar} className="w-14 h-14 rounded-2xl object-cover" alt="" />
+                    <div className="flex-1 truncate">
+                        <div className="flex justify-between items-center"><h3 className="font-bold text-sm">{chat.name}</h3><span className="text-[10px] opacity-40 font-bold">{chat.lastTimestamp ? new Date(chat.lastTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</span></div>
+                        <p className="text-xs opacity-50 truncate">{chat.lastMessage || chat.phone}</p>
+                    </div>
                 </div>
-                </div>
-            )) : <p className="text-xs text-center py-4 opacity-40 italic">No recent chats found</p>}
+            )) : searchQuery && (
+                <p className="text-[11px] text-center py-2 opacity-30 italic">No existing chats match your search</p>
+            )}
           </div>
 
-          {/* Discovery / Global Users (Search Results) */}
-          {searchQuery && globalFiltered.length > 0 && (
-            <div className="space-y-1 pt-4 border-t border-slate-100 dark:border-slate-800">
-                <label className="text-[10px] font-black uppercase tracking-[0.2em] opacity-40 ml-4 mb-2 block">Global Nest (New People)</label>
-                {globalFiltered.map(user => (
-                    <div key={user.id} onClick={() => startNewChat(user)} className="flex items-center gap-4 p-4 cursor-pointer rounded-3xl bg-orange-500/5 border border-orange-500/10 hover:bg-orange-500/10 transition-all">
-                        <img src={user.avatar} className="w-12 h-12 rounded-xl object-cover" alt="" />
-                        <div className="flex-1 truncate">
-                            <h3 className="font-bold text-sm text-orange-600 dark:text-orange-400">{user.name}</h3>
-                            <p className="text-[10px] opacity-50 font-bold uppercase tracking-widest">{user.phone}</p>
+          {/* Section 2: Global Search (Only shows if there's a search query) */}
+          {searchQuery.trim() !== "" && (
+            <div className="space-y-2 pt-4 border-t border-slate-100 dark:border-slate-800 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                <div className="flex items-center justify-between px-4 mb-3">
+                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-orange-500">Discover New People</label>
+                    <UserSearch className="w-3 h-3 text-orange-500 opacity-50" />
+                </div>
+                
+                {globalFiltered.length > 0 ? (
+                    globalFiltered.map(user => (
+                        <div key={user.id} onClick={() => startNewChat(user)} className="group flex items-center gap-4 p-4 cursor-pointer rounded-3xl bg-orange-500/5 border border-orange-500/10 hover:bg-orange-500/10 transition-all">
+                            <div className="relative">
+                                <img src={user.avatar} className="w-12 h-12 rounded-xl object-cover shadow-sm" alt="" />
+                                <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-emerald-500 border-2 border-white dark:border-slate-900 rounded-full" />
+                            </div>
+                            <div className="flex-1 truncate">
+                                <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200 group-hover:text-orange-600 transition-colors">{user.name}</h3>
+                                <p className="text-[10px] opacity-50 font-bold uppercase tracking-widest">{user.phone}</p>
+                            </div>
+                            <div className="bg-orange-500 text-white p-2 rounded-xl shadow-lg shadow-orange-500/20 group-hover:scale-110 transition-transform">
+                                <UserPlus className="w-4 h-4" />
+                            </div>
                         </div>
-                        <UserPlus className="w-4 h-4 text-orange-500" />
+                    ))
+                ) : (
+                    <div className="text-center py-10 px-6">
+                        <div className="w-12 h-12 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-3 opacity-50">
+                            <Search className="w-5 h-5" />
+                        </div>
+                        <p className="text-xs font-bold opacity-40">No new nestlings found with this info.</p>
+                        <p className="text-[10px] opacity-30 mt-1">Make sure the number or name is exact.</p>
                     </div>
-                ))}
+                )}
             </div>
           )}
         </div>
@@ -667,22 +695,6 @@ export default function App() {
                     )}
                 </div>
             </div>
-        )}
-
-        {/* Global Key Selection Modal */}
-        {!hasApiKey && (
-          <div className="fixed inset-0 z-[2000] bg-slate-950/90 backdrop-blur-xl flex items-center justify-center p-6 text-center">
-            <div className="max-w-md bg-white dark:bg-slate-900 rounded-[3rem] p-10 shadow-2xl">
-              <ShieldCheck className="w-16 h-16 text-orange-500 mx-auto mb-6" />
-              <h2 className="text-2xl font-black mb-4">AI Features Locked</h2>
-              <p className="text-sm opacity-60 mb-8">Advanced features like video generation require a paid API key.</p>
-              <button onClick={async () => {
-                  // @ts-ignore
-                  if (window.aistudio) await window.aistudio.openSelectKey();
-                  setHasApiKey(true);
-              }} className="w-full py-4 bg-orange-500 text-white rounded-2xl font-bold shadow-lg">Select API Key</button>
-            </div>
-          </div>
         )}
 
         {/* Settings Panel */}
