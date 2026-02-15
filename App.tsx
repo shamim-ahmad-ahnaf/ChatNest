@@ -11,7 +11,7 @@ import {
     Zap, VideoOff, Plus, Edit3, CameraIcon, Image as ImageIcon,
     Info, LogOut as LeaveIcon, ShieldCheck, UserMinus, Settings2,
     Clock, SearchIcon, Moon, Sun, Layout, FileText, Loader2, ExternalLink,
-    PlusCircle, Maximize2, Volume2, VolumeX, Mic2, Upload
+    PlusCircle, Maximize2, Volume2, VolumeX, Mic2, Upload, UserPlus
 } from 'lucide-react';
 
 const THEME_COLORS = [
@@ -24,19 +24,13 @@ const THEME_COLORS = [
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏', '🔥', '✨'];
 
 export default function App() {
+  const [isRegistered, setIsRegistered] = useState(() => !!localStorage.getItem('chatnest_profile'));
+  const [regName, setRegName] = useState('');
+  const [regPhone, setRegPhone] = useState('');
+  
   const [myProfile, setMyProfile] = useState<UserProfile | null>(() => {
     const saved = localStorage.getItem('chatnest_profile');
-    if (saved) return JSON.parse(saved);
-    const guest: UserProfile = {
-        id: 'user-' + Math.random().toString(36).substr(2, 9),
-        name: 'Nestling Guest',
-        phone: '+1 234 567 890',
-        avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=Guest-${Date.now()}`,
-        bio: 'Just hanging in the nest.',
-        status: 'online'
-    };
-    localStorage.setItem('chatnest_profile', JSON.stringify(guest));
-    return guest;
+    return saved ? JSON.parse(saved) : null;
   });
   
   const [isDarkMode, setIsDarkMode] = useState(() => localStorage.getItem('chatnest_dark') === 'true');
@@ -49,6 +43,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'chats' | 'contacts'>('chats');
   const [showSettings, setShowSettings] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [globalUsers, setGlobalUsers] = useState<UserProfile[]>([]);
   
   const [hasApiKey, setHasApiKey] = useState(true);
   const [activeReactionPickerId, setActiveReactionPickerId] = useState<string | null>(null);
@@ -73,9 +68,16 @@ export default function App() {
   const activeChat = chats.find(c => c.id === activeChatId);
   const currentTheme = THEME_COLORS.find(t => t.name === themeColor) || THEME_COLORS[0];
 
-  const filteredList = chats.filter(chat => 
+  // Filtering local chats + discovery of global users
+  const localFiltered = chats.filter(chat => 
     chat.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
     chat.phone.includes(searchQuery)
+  );
+
+  const globalFiltered = globalUsers.filter(user => 
+    user.id !== myProfile?.id &&
+    !chats.some(c => c.id === user.id) &&
+    (user.name.toLowerCase().includes(searchQuery.toLowerCase()) || user.phone.includes(searchQuery))
   );
 
   useEffect(() => {
@@ -83,18 +85,6 @@ export default function App() {
     else document.documentElement.classList.remove('dark');
     localStorage.setItem('chatnest_dark', isDarkMode.toString());
   }, [isDarkMode]);
-
-  useEffect(() => {
-    const checkKey = async () => {
-      // @ts-ignore
-      if (window.aistudio) {
-        // @ts-ignore
-        const hasKey = await window.aistudio.hasSelectedApiKey();
-        setHasApiKey(hasKey);
-      }
-    };
-    checkKey();
-  }, []);
 
   useEffect(() => {
     if (activeChatId) setMessages(dbService.getMessages(activeChatId));
@@ -105,32 +95,69 @@ export default function App() {
   }, [messages, isTyping]);
 
   useEffect(() => {
-    apiService.connect(
-      (data) => {
-        if (data.type === 'signal') {
-          handleIncomingSignal(data);
-        } else if (data.type === 'new_message') {
-          if (data.message.chatId === activeChatId) {
-            setMessages(prev => [...prev, data.message]);
+    if (isRegistered && myProfile) {
+      apiService.connect(
+        (data) => {
+          if (data.type === 'presence_update') {
+            setGlobalUsers(data.users);
+          } else if (data.type === 'signal') {
+            handleIncomingSignal(data);
+          } else if (data.type === 'new_message') {
+            if (data.message.chatId === activeChatId || data.message.senderId === activeChatId) {
+              setMessages(prev => [...prev, data.message]);
+            }
+            setChats(dbService.getChats());
           }
-          setChats(dbService.getChats());
+        },
+        (status) => {
+            if (status) {
+                apiService.sendMessage({ type: 'join', profile: myProfile });
+            }
         }
-      },
-      (status) => console.log("Backend connection:", status)
-    );
-  }, [activeChatId]);
-
-  useEffect(() => {
-    if (localVideoRef.current && localStream && callType === 'video') {
-      localVideoRef.current.srcObject = localStream;
+      );
     }
-  }, [localStream, isCallActive, callType]);
+  }, [isRegistered, myProfile, activeChatId]);
 
-  useEffect(() => {
-    if (remoteVideoRef.current && remoteStream && callType === 'video') {
-      remoteVideoRef.current.srcObject = remoteStream;
+  const handleRegister = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!regName.trim() || !regPhone.trim()) return;
+    
+    const newProfile: UserProfile = {
+        id: 'user-' + Math.random().toString(36).substr(2, 9),
+        name: regName,
+        phone: regPhone,
+        avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${regName}-${Date.now()}`,
+        bio: 'Fresh in the Nest!',
+        status: 'online'
+    };
+    
+    setMyProfile(newProfile);
+    localStorage.setItem('chatnest_profile', JSON.stringify(newProfile));
+    setIsRegistered(true);
+  };
+
+  const startNewChat = (user: UserProfile) => {
+    const existingChat = chats.find(c => c.id === user.id);
+    if (existingChat) {
+        setActiveChatId(user.id);
+    } else {
+        const newChat: ChatSession = {
+            id: user.id,
+            name: user.name,
+            avatar: user.avatar,
+            phone: user.phone,
+            isOnline: true,
+            type: 'contact',
+            unreadCount: 0,
+            lastMessage: 'Started a new conversation'
+        };
+        const updatedChats = [newChat, ...chats];
+        setChats(updatedChats);
+        dbService.saveChats(updatedChats);
+        setActiveChatId(user.id);
     }
-  }, [remoteStream, isCallActive, callType]);
+    setSearchQuery('');
+  };
 
   const initPeerConnection = () => {
     pc.current = new RTCPeerConnection({
@@ -257,15 +284,6 @@ export default function App() {
     }
   };
 
-  const handleOpenKeySelection = async () => {
-    // @ts-ignore
-    if (window.aistudio) {
-      // @ts-ignore
-      await window.aistudio.openSelectKey();
-      setHasApiKey(true);
-    }
-  };
-
   const handleToggleReaction = (messageId: string, emoji: string) => {
     if (!myProfile) return;
     dbService.addReaction(messageId, myProfile.id, emoji);
@@ -282,6 +300,7 @@ export default function App() {
         const updatedProfile = { ...myProfile, avatar: base64String };
         setMyProfile(updatedProfile);
         localStorage.setItem('chatnest_profile', JSON.stringify(updatedProfile));
+        apiService.sendMessage({ type: 'join', profile: updatedProfile });
       };
       reader.readAsDataURL(file);
     }
@@ -291,9 +310,8 @@ export default function App() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Check file size to prevent quota issues (limit to 1MB)
     if (file.size > 1 * 1024 * 1024) {
-      alert("File too large. Please select a file smaller than 1MB to avoid storage limit errors.");
+      alert("File too large. Please select a file smaller than 1MB.");
       return;
     }
 
@@ -357,9 +375,36 @@ export default function App() {
     }
   };
 
+  if (!isRegistered) {
+    return (
+        <div className="h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-6">
+            <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-[3rem] p-10 shadow-2xl border border-slate-100 dark:border-slate-800 animate-in zoom-in-95">
+                <div className={`w-20 h-20 bg-orange-500 rounded-3xl flex items-center justify-center mx-auto mb-8 shadow-lg`}>
+                    <Zap className="w-10 h-10 text-white" />
+                </div>
+                <h1 className="text-3xl font-black text-center mb-2">Welcome to Nest</h1>
+                <p className="text-slate-400 text-center mb-8 font-medium">Register your profile to start nesting.</p>
+                <form onSubmit={handleRegister} className="space-y-6">
+                    <div className="space-y-2">
+                        <label className="text-xs font-black uppercase tracking-widest opacity-40 ml-1">Full Name</label>
+                        <input value={regName} onChange={e => setRegName(e.target.value)} type="text" placeholder="e.g. Neo Smith" className="w-full bg-slate-50 dark:bg-slate-800 p-4 rounded-2xl outline-none focus:ring-2 ring-orange-500/20 font-bold" required />
+                    </div>
+                    <div className="space-y-2">
+                        <label className="text-xs font-black uppercase tracking-widest opacity-40 ml-1">Phone Number</label>
+                        <input value={regPhone} onChange={e => setRegPhone(e.target.value)} type="tel" placeholder="+880 1XXX XXXXXX" className="w-full bg-slate-50 dark:bg-slate-800 p-4 rounded-2xl outline-none focus:ring-2 ring-orange-500/20 font-bold" required />
+                    </div>
+                    <button type="submit" className="w-full py-5 bg-orange-500 text-white rounded-2xl font-black text-lg shadow-xl shadow-orange-500/20 hover:scale-[1.02] active:scale-95 transition-all">
+                        Create My Nest
+                    </button>
+                </form>
+            </div>
+        </div>
+    );
+  }
+
   return (
     <div className={`flex h-screen bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-jakarta selection:bg-${currentTheme.class}/20`}>
-      {/* Navigation */}
+      {/* Navigation - Sidebar for Desktop */}
       <nav className="hidden md:flex w-20 flex-col items-center py-8 gap-8 border-r border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 z-50">
         <div onClick={() => setActiveChatId(null)} className={`w-12 h-12 bg-${currentTheme.class} rounded-2xl flex items-center justify-center cursor-pointer hover:rotate-12 transition-all shadow-lg`}>
           <Zap className="w-6 h-6 text-white" />
@@ -372,25 +417,52 @@ export default function App() {
         <button onClick={() => setShowSettings(true)} className="p-1"><img src={myProfile?.avatar} className="w-10 h-10 rounded-xl object-cover" alt="" /></button>
       </nav>
 
-      {/* Chat List */}
+      {/* Chat List & Search */}
       <aside className={`${activeChatId ? 'hidden md:flex' : 'flex'} w-full md:w-80 lg:w-96 flex-col border-r border-slate-100 dark:border-slate-800 bg-slate-50/30 dark:bg-slate-900/50`}>
         <div className="p-6">
-          <h1 className="text-2xl font-black mb-6">ChatNest</h1>
+          <div className="flex items-center justify-between mb-6">
+            <h1 className="text-2xl font-black">ChatNest</h1>
+            <button onClick={() => setShowSettings(true)} className="md:hidden w-10 h-10 rounded-xl overflow-hidden shadow-sm border border-white dark:border-slate-800">
+                <img src={myProfile?.avatar} className="w-full h-full object-cover" alt="" />
+            </button>
+          </div>
           <div className="relative mb-6">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input type="text" placeholder="Search nestlings..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-white dark:bg-slate-800 rounded-2xl py-3 pl-12 pr-4 text-sm outline-none shadow-sm" />
+            <input type="text" placeholder="Search nestlings..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-white dark:bg-slate-800 rounded-2xl py-3 pl-12 pr-4 text-sm outline-none shadow-sm focus:ring-2 ring-orange-500/10" />
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-1">
-          {filteredList.map(chat => (
-            <div key={chat.id} onClick={() => setActiveChatId(chat.id)} className={`flex items-center gap-4 p-4 cursor-pointer rounded-3xl transition-all ${activeChatId === chat.id ? 'bg-white dark:bg-slate-800 shadow-md' : 'hover:bg-white/50 dark:hover:bg-slate-800/20'}`}>
-              <img src={chat.avatar} className="w-14 h-14 rounded-2xl object-cover" alt="" />
-              <div className="flex-1 truncate">
-                <div className="flex justify-between items-center"><h3 className="font-bold text-sm">{chat.name}</h3><span className="text-[10px] opacity-40 font-bold">{chat.lastTimestamp ? new Date(chat.lastTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</span></div>
-                <p className="text-xs opacity-50 truncate">{chat.lastMessage || chat.phone}</p>
-              </div>
+        
+        <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-4">
+          {/* Current Conversations */}
+          <div className="space-y-1">
+            <label className="text-[10px] font-black uppercase tracking-[0.2em] opacity-40 ml-4 mb-2 block">Recent Chats</label>
+            {localFiltered.length > 0 ? localFiltered.map(chat => (
+                <div key={chat.id} onClick={() => setActiveChatId(chat.id)} className={`flex items-center gap-4 p-4 cursor-pointer rounded-3xl transition-all ${activeChatId === chat.id ? 'bg-white dark:bg-slate-800 shadow-md' : 'hover:bg-white/50 dark:hover:bg-slate-800/20'}`}>
+                <img src={chat.avatar} className="w-14 h-14 rounded-2xl object-cover" alt="" />
+                <div className="flex-1 truncate">
+                    <div className="flex justify-between items-center"><h3 className="font-bold text-sm">{chat.name}</h3><span className="text-[10px] opacity-40 font-bold">{chat.lastTimestamp ? new Date(chat.lastTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</span></div>
+                    <p className="text-xs opacity-50 truncate">{chat.lastMessage || chat.phone}</p>
+                </div>
+                </div>
+            )) : <p className="text-xs text-center py-4 opacity-40 italic">No recent chats found</p>}
+          </div>
+
+          {/* Discovery / Global Users (Search Results) */}
+          {searchQuery && globalFiltered.length > 0 && (
+            <div className="space-y-1 pt-4 border-t border-slate-100 dark:border-slate-800">
+                <label className="text-[10px] font-black uppercase tracking-[0.2em] opacity-40 ml-4 mb-2 block">Global Nest (New People)</label>
+                {globalFiltered.map(user => (
+                    <div key={user.id} onClick={() => startNewChat(user)} className="flex items-center gap-4 p-4 cursor-pointer rounded-3xl bg-orange-500/5 border border-orange-500/10 hover:bg-orange-500/10 transition-all">
+                        <img src={user.avatar} className="w-12 h-12 rounded-xl object-cover" alt="" />
+                        <div className="flex-1 truncate">
+                            <h3 className="font-bold text-sm text-orange-600 dark:text-orange-400">{user.name}</h3>
+                            <p className="text-[10px] opacity-50 font-bold uppercase tracking-widest">{user.phone}</p>
+                        </div>
+                        <UserPlus className="w-4 h-4 text-orange-500" />
+                    </div>
+                ))}
             </div>
-          ))}
+          )}
         </div>
       </aside>
 
@@ -398,26 +470,36 @@ export default function App() {
       <main className={`${activeChatId ? 'flex' : 'hidden md:flex'} flex-1 flex flex-col h-full bg-white dark:bg-slate-950 relative`}>
         {activeChat ? (
           <>
-            <header className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between glass-morphism z-40">
-              <div className="flex items-center gap-4">
-                <button onClick={() => setActiveChatId(null)} className="md:hidden p-2"><ArrowLeft /></button>
-                <div className="flex items-center gap-3">
-                  <img src={activeChat.avatar} className="w-10 h-10 rounded-xl object-cover" alt="" />
-                  <div><h2 className="font-bold text-sm">{activeChat.name}</h2><p className="text-[10px] opacity-50 font-bold uppercase tracking-widest">{isTyping ? 'Thinking...' : 'Active Now'}</p></div>
+            <header className="px-4 py-3 md:px-6 md:py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between glass-morphism z-40 sticky top-0">
+              <div className="flex items-center gap-2 md:gap-4 overflow-hidden">
+                <button onClick={() => setActiveChatId(null)} className="md:hidden p-2 -ml-2 text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors">
+                  <ArrowLeft className="w-6 h-6" />
+                </button>
+                <div className="flex items-center gap-3 min-w-0">
+                  <img src={activeChat.avatar} className="w-9 h-9 md:w-10 md:h-10 rounded-xl object-cover flex-shrink-0" alt="" />
+                  <div className="truncate">
+                    <h2 className="font-bold text-sm md:text-base truncate">{activeChat.name}</h2>
+                    <p className="text-[9px] md:text-[10px] opacity-50 font-bold uppercase tracking-widest truncate">{isTyping ? 'Thinking...' : 'Active Now'}</p>
+                  </div>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
-                <button onClick={() => startCall('audio')} className={`p-2.5 rounded-xl text-slate-400 hover:text-${currentTheme.class} hover:bg-${currentTheme.class}/10 transition-all`} title="Audio Call"><Phone className="w-5.5 h-5.5" /></button>
-                <button onClick={() => startCall('video')} className={`p-2.5 rounded-xl text-slate-400 hover:text-${currentTheme.class} hover:bg-${currentTheme.class}/10 transition-all`} title="Video Call"><Video className="w-5.5 h-5.5" /></button>
-                <button className="p-2 text-slate-400"><MoreVertical className="w-5 h-5" /></button>
+              
+              <div className="flex items-center gap-1 md:gap-2 flex-shrink-0">
+                <button onClick={() => startCall('audio')} className={`p-2 md:p-2.5 rounded-xl text-slate-400 hover:text-${currentTheme.class} hover:bg-${currentTheme.class}/10 transition-all`} title="Audio Call">
+                    <Phone className="w-5 h-5 md:w-5.5 md:h-5.5" />
+                </button>
+                <button onClick={() => startCall('video')} className={`p-2 md:p-2.5 rounded-xl text-slate-400 hover:text-${currentTheme.class} hover:bg-${currentTheme.class}/10 transition-all`} title="Video Call">
+                    <Video className="w-5 h-5 md:w-5.5 md:h-5.5" />
+                </button>
+                <button className="p-2 text-slate-400"><MoreVertical className="w-4.5 h-4.5 md:w-5 md:h-5" /></button>
               </div>
             </header>
 
-            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+            <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6">
               {messages.map((msg) => (
                 <div key={msg.id} className={`flex flex-col ${msg.senderId === myProfile?.id ? 'items-end' : 'items-start'}`}>
                   <div className="relative group">
-                    <div className={`max-w-lg p-4 rounded-2xl shadow-sm ${msg.senderId === myProfile?.id ? `bg-${currentTheme.class} text-white rounded-tr-none` : 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100 rounded-tl-none'}`}>
+                    <div className={`max-w-[85%] md:max-w-lg p-4 rounded-2xl shadow-sm ${msg.senderId === myProfile?.id ? `bg-${currentTheme.class} text-white rounded-tr-none` : 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100 rounded-tl-none'}`}>
                       {msg.media?.type === 'image' && <img src={msg.media.url} className="w-full rounded-xl mb-2" alt="" />}
                       {msg.media?.type === 'video' && <video src={msg.media.url} controls className="w-full rounded-xl mb-2" />}
                       {msg.media?.type === 'audio' && <audio src={msg.media.url} controls className="w-full mb-2" />}
@@ -470,11 +552,11 @@ export default function App() {
               <div ref={scrollRef} />
             </div>
 
-            <footer className="p-6 border-t border-slate-100 dark:border-slate-800">
-              <div className="max-w-4xl mx-auto flex items-end gap-3 p-1.5 bg-slate-50 dark:bg-slate-900 rounded-[2rem] border border-slate-200/50 dark:border-slate-800">
+            <footer className="p-4 md:p-6 border-t border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-950">
+              <div className="max-w-4xl mx-auto flex items-end gap-2 md:gap-3 p-1.5 bg-slate-50 dark:bg-slate-900 rounded-[2rem] border border-slate-200/50 dark:border-slate-800">
                 <div className="flex">
-                    <button onClick={() => mediaInputRef.current?.click()} className={`p-3.5 rounded-full transition-all text-slate-400 hover:text-${currentTheme.class} hover:bg-${currentTheme.class}/10`} title="Attach Files">
-                      <Plus className="w-6 h-6" />
+                    <button onClick={() => mediaInputRef.current?.click()} className={`p-3 md:p-3.5 rounded-full transition-all text-slate-400 hover:text-${currentTheme.class} hover:bg-${currentTheme.class}/10`} title="Attach Files">
+                      <Plus className="w-5 h-5 md:w-6 md:h-6" />
                     </button>
                     <input type="file" ref={mediaInputRef} onChange={handleMediaFileSelect} className="hidden" accept="image/*,video/*,audio/*,application/pdf,.doc,.docx,.txt" />
                 </div>
@@ -484,17 +566,19 @@ export default function App() {
                   onChange={(e) => setInputText(e.target.value)} 
                   onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleSendMessage(inputText))} 
                   placeholder="Hatch a message..." 
-                  className="flex-1 bg-transparent py-3 px-2 outline-none text-[15px] font-medium resize-none min-h-[44px] flex items-center" 
+                  className="flex-1 bg-transparent py-3 px-1 outline-none text-[14px] md:text-[15px] font-medium resize-none min-h-[44px] flex items-center" 
                 />
-                <button onClick={() => handleSendMessage(inputText)} className={`p-3.5 bg-${currentTheme.class} text-white rounded-full shadow-xl active:scale-90 transition-all`}><Send className="w-6 h-6" /></button>
+                <button onClick={() => handleSendMessage(inputText)} className={`p-3 md:p-3.5 bg-${currentTheme.class} text-white rounded-full shadow-xl active:scale-90 transition-all flex-shrink-0`}>
+                    <Send className="w-5 h-5 md:w-6 md:h-6" />
+                </button>
               </div>
             </footer>
           </>
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-center px-10">
-            <div className={`w-32 h-32 bg-${currentTheme.class}/10 rounded-[3rem] flex items-center justify-center mb-10 shadow-2xl`}><Zap className={`w-16 h-16 text-${currentTheme.class}`} /></div>
-            <h2 className="text-4xl font-black mb-4">Welcome to ChatNest</h2>
-            <p className="max-w-md opacity-50 font-medium">The most intelligent nest for your digital conversations.</p>
+            <div className={`w-24 h-24 md:w-32 md:h-32 bg-${currentTheme.class}/10 rounded-[2rem] md:rounded-[3rem] flex items-center justify-center mb-6 md:mb-10 shadow-2xl`}><Zap className={`w-12 h-12 md:w-16 md:h-16 text-${currentTheme.class}`} /></div>
+            <h2 className="text-3xl md:text-4xl font-black mb-4">Welcome to ChatNest</h2>
+            <p className="max-w-md opacity-50 font-medium text-sm md:text-base">The most intelligent nest for your digital conversations. Search by name or number to find others.</p>
           </div>
         )}
 
@@ -506,83 +590,77 @@ export default function App() {
                         remoteStream ? (
                             <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover" />
                         ) : (
-                            <div className="flex flex-col items-center gap-6 animate-pulse">
-                                <img src={activeChat?.avatar || incomingSignal?.from} className="w-40 h-40 rounded-full border-4 border-white/10" alt="" />
+                            <div className="flex flex-col items-center gap-6 animate-pulse px-6">
+                                <img src={activeChat?.avatar || incomingSignal?.from} className="w-32 h-32 md:w-40 md:h-40 rounded-full border-4 border-white/10" alt="" />
                                 <div className="text-center">
-                                    <h3 className="text-2xl font-black text-white">{activeChat?.name || 'Incoming User'}</h3>
-                                    <p className="text-orange-500 font-bold uppercase tracking-[0.4em] text-xs mt-2">
+                                    <h3 className="text-xl md:text-2xl font-black text-white">{activeChat?.name || 'Incoming User'}</h3>
+                                    <p className="text-orange-500 font-bold uppercase tracking-[0.4em] text-[10px] md:text-xs mt-2">
                                         {callStatus === 'dialing' ? 'Dialing...' : callStatus === 'incoming' ? 'Incoming Video Call...' : 'Connecting...'}
                                     </p>
                                 </div>
                             </div>
                         )
                     ) : (
-                        <div className="flex flex-col items-center gap-12">
+                        <div className="flex flex-col items-center gap-8 md:gap-12 px-6">
                             <div className="relative">
                                 <div className="absolute -inset-10 border-2 border-white/5 rounded-full animate-ping opacity-20" />
-                                <div className="absolute -inset-20 border border-white/5 rounded-full animate-pulse opacity-10" />
-                                <img src={activeChat?.avatar || incomingSignal?.from} className="w-64 h-64 rounded-full border-8 border-white/10 shadow-2xl relative z-10" alt="" />
+                                <img src={activeChat?.avatar || incomingSignal?.from} className="w-48 h-48 md:w-64 md:h-64 rounded-full border-8 border-white/10 shadow-2xl relative z-10" alt="" />
                                 <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 bg-emerald-500 p-3 rounded-2xl shadow-lg z-20">
-                                    <Mic2 className="w-6 h-6 text-white" />
+                                    <Mic2 className="w-5 h-5 md:w-6 md:h-6 text-white" />
                                 </div>
                             </div>
                             <div className="text-center z-10">
-                                <h3 className="text-4xl font-black text-white mb-3">{activeChat?.name || 'Incoming Caller'}</h3>
-                                <p className="text-orange-500 font-bold uppercase tracking-[0.6em] text-[10px] animate-pulse">
+                                <h3 className="text-2xl md:text-4xl font-black text-white mb-3">{activeChat?.name || 'Incoming Caller'}</h3>
+                                <p className="text-orange-500 font-bold uppercase tracking-[0.4em] text-[10px] animate-pulse">
                                     {callStatus === 'dialing' ? 'Dialing...' : callStatus === 'incoming' ? 'Incoming Audio Call...' : 'On Call'}
                                 </p>
-                            </div>
-                            <div className="flex items-end gap-1.5 h-12">
-                                {[...Array(12)].map((_, i) => (
-                                    <div key={i} className={`w-1.5 bg-white/20 rounded-full animate-recording-bar`} style={{ height: `${20 + Math.random() * 80}%`, animationDelay: `${i * 0.1}s` }} />
-                                ))}
                             </div>
                         </div>
                     )}
                 </div>
 
                 {callType === 'video' && (
-                    <div className="absolute top-10 right-10 w-48 h-64 bg-slate-800 rounded-3xl overflow-hidden shadow-2xl border-2 border-white/20 z-10 transition-transform active:scale-95">
+                    <div className="absolute top-6 right-6 md:top-10 md:right-10 w-32 h-44 md:w-48 md:h-64 bg-slate-800 rounded-2xl md:rounded-3xl overflow-hidden shadow-2xl border-2 border-white/20 z-10 transition-transform">
                         {localStream ? (
                             <video ref={localVideoRef} autoPlay playsInline muted className={`w-full h-full object-cover ${isVideoOff ? 'hidden' : ''}`} />
                         ) : null}
                         {isVideoOff && (
                             <div className="w-full h-full flex items-center justify-center bg-slate-900">
-                                <VideoOff className="w-10 h-10 text-slate-600" />
+                                <VideoOff className="w-8 h-8 text-slate-600" />
                             </div>
                         )}
                     </div>
                 )}
 
-                <div className="absolute top-10 left-10 flex items-center gap-4 bg-black/30 backdrop-blur-md p-4 rounded-3xl border border-white/10 z-10">
-                   <ShieldCheck className="w-5 h-5 text-emerald-500" />
+                <div className="absolute top-6 left-6 md:top-10 md:left-10 flex items-center gap-3 bg-black/30 backdrop-blur-md p-3 md:p-4 rounded-2xl md:rounded-3xl border border-white/10 z-10">
+                   <ShieldCheck className="w-4 h-4 md:w-5 md:h-5 text-emerald-500" />
                    <div>
-                       <p className="text-white text-sm font-black">{activeChat?.name || 'Nestling'}</p>
-                       <p className="text-white/50 text-[10px] uppercase font-bold tracking-widest">Secure Connection</p>
+                       <p className="text-white text-xs md:text-sm font-black truncate max-w-[120px]">{activeChat?.name || 'Nestling'}</p>
+                       <p className="text-white/50 text-[8px] md:text-[10px] uppercase font-bold tracking-widest">Secure Call</p>
                    </div>
                 </div>
 
-                <div className="absolute bottom-12 flex items-center gap-6 z-20">
+                <div className="absolute bottom-12 flex items-center gap-4 md:gap-6 z-20 scale-90 md:scale-100">
                     {callStatus === 'incoming' ? (
                         <>
-                            <button onClick={answerCall} className="w-20 h-20 bg-emerald-500 text-white rounded-full flex items-center justify-center shadow-2xl hover:bg-emerald-600 transition-all active:scale-90 ring-4 ring-emerald-500/30">
-                                {callType === 'video' ? <Video className="w-8 h-8" /> : <Phone className="w-8 h-8" />}
+                            <button onClick={answerCall} className="w-16 h-16 md:w-20 md:h-20 bg-emerald-500 text-white rounded-full flex items-center justify-center shadow-2xl hover:bg-emerald-600 transition-all ring-4 ring-emerald-500/30">
+                                {callType === 'video' ? <Video className="w-6 h-6 md:w-8 md:h-8" /> : <Phone className="w-6 h-6 md:w-8 md:h-8" />}
                             </button>
-                            <button onClick={endCall} className="w-20 h-20 bg-rose-500 text-white rounded-full flex items-center justify-center shadow-2xl hover:bg-rose-600 transition-all active:scale-90 ring-4 ring-rose-500/30">
-                                <PhoneOff className="w-8 h-8" />
+                            <button onClick={endCall} className="w-16 h-16 md:w-20 md:h-20 bg-rose-500 text-white rounded-full flex items-center justify-center shadow-2xl hover:bg-rose-600 transition-all ring-4 ring-rose-500/30">
+                                <PhoneOff className="w-6 h-6 md:w-8 md:h-8" />
                             </button>
                         </>
                     ) : (
                         <>
-                            <button onClick={toggleMic} className={`w-16 h-16 rounded-full flex items-center justify-center backdrop-blur-md border border-white/10 transition-all active:scale-90 ${isMicMuted ? 'bg-rose-500 text-white shadow-[0_0_20px_rgba(244,63,94,0.3)]' : 'bg-white/10 text-white hover:bg-white/20'}`}>
-                                {isMicMuted ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
+                            <button onClick={toggleMic} className={`w-14 h-14 md:w-16 md:h-16 rounded-full flex items-center justify-center backdrop-blur-md border border-white/10 transition-all ${isMicMuted ? 'bg-rose-500 text-white' : 'bg-white/10 text-white'}`}>
+                                {isMicMuted ? <MicOff className="w-5 h-5 md:w-6 md:h-6" /> : <Mic className="w-5 h-5 md:w-6 md:h-6" />}
                             </button>
-                            <button onClick={endCall} className="w-20 h-20 bg-rose-500 text-white rounded-full flex items-center justify-center shadow-2xl hover:bg-rose-600 transition-all active:scale-90 hover:rotate-12 ring-4 ring-rose-500/20">
-                                <PhoneOff className="w-8 h-8" />
+                            <button onClick={endCall} className="w-16 h-16 md:w-20 md:h-20 bg-rose-500 text-white rounded-full flex items-center justify-center shadow-2xl hover:bg-rose-600 transition-all ring-4 ring-rose-500/20">
+                                <PhoneOff className="w-6 h-6 md:w-8 md:h-8" />
                             </button>
                             {callType === 'video' && (
-                                <button onClick={toggleVideo} className={`w-16 h-16 rounded-full flex items-center justify-center backdrop-blur-md border border-white/10 transition-all active:scale-90 ${isVideoOff ? 'bg-rose-500 text-white shadow-[0_0_20px_rgba(244,63,94,0.3)]' : 'bg-white/10 text-white hover:bg-white/20'}`}>
-                                    {isVideoOff ? <VideoOff className="w-6 h-6" /> : <CameraIcon className="w-6 h-6" />}
+                                <button onClick={toggleVideo} className={`w-14 h-14 md:w-16 md:h-16 rounded-full flex items-center justify-center backdrop-blur-md border border-white/10 transition-all ${isVideoOff ? 'bg-rose-500 text-white' : 'bg-white/10 text-white'}`}>
+                                    {isVideoOff ? <VideoOff className="w-5 h-5 md:w-6 md:h-6" /> : <CameraIcon className="w-5 h-5 md:w-6 md:h-6" />}
                                 </button>
                             )}
                         </>
@@ -591,72 +669,53 @@ export default function App() {
             </div>
         )}
 
+        {/* Global Key Selection Modal */}
         {!hasApiKey && (
           <div className="fixed inset-0 z-[2000] bg-slate-950/90 backdrop-blur-xl flex items-center justify-center p-6 text-center">
-            <div className="max-w-md bg-white dark:bg-slate-900 rounded-[3rem] p-10 shadow-2xl animate-in zoom-in-95">
-              <div className="w-20 h-20 bg-orange-500/10 rounded-3xl flex items-center justify-center mx-auto mb-6">
-                <ShieldCheck className="w-10 h-10 text-orange-500" />
-              </div>
-              <h2 className="text-2xl font-black mb-4">API Key Required</h2>
-              <p className="text-sm opacity-60 mb-8 font-medium leading-relaxed">
-                To use video generation and other advanced AI features, you must select a paid API key. 
-                Visit the <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noreferrer" className="text-orange-500 underline font-bold">billing documentation</a> for details.
-              </p>
-              <button onClick={handleOpenKeySelection} className="w-full py-4 bg-orange-500 text-white rounded-2xl font-bold shadow-lg hover:bg-orange-600 transition-all transform active:scale-95">
-                Select API Key
-              </button>
+            <div className="max-w-md bg-white dark:bg-slate-900 rounded-[3rem] p-10 shadow-2xl">
+              <ShieldCheck className="w-16 h-16 text-orange-500 mx-auto mb-6" />
+              <h2 className="text-2xl font-black mb-4">AI Features Locked</h2>
+              <p className="text-sm opacity-60 mb-8">Advanced features like video generation require a paid API key.</p>
+              <button onClick={async () => {
+                  // @ts-ignore
+                  if (window.aistudio) await window.aistudio.openSelectKey();
+                  setHasApiKey(true);
+              }} className="w-full py-4 bg-orange-500 text-white rounded-2xl font-bold shadow-lg">Select API Key</button>
             </div>
           </div>
         )}
 
-        {activeReactionPickerId && (
-            <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-slate-950/20 backdrop-blur-sm" onClick={() => setActiveReactionPickerId(null)}>
-                <div className="bg-white dark:bg-slate-900 p-6 rounded-[2.5rem] shadow-2xl w-full max-w-sm animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
-                    <h2 className="text-sm font-black uppercase tracking-widest opacity-40 mb-4 px-2">Nest Reactions</h2>
-                    <div className="grid grid-cols-6 gap-3">
-                        {['🔥', '✨', '🚀', '⭐', '🎈', '🎉', '💡', '🤔', '👀', '💯', '🌈', '👏', '🙌', '🤝', '🦋', '🍀', '🍕', '🎸', '🎮'].map(e => (
-                            <button key={e} onClick={() => handleToggleReaction(activeReactionPickerId, e)} className="text-2xl hover:scale-125 transition-all p-2 bg-slate-50 dark:bg-slate-800 rounded-xl">{e}</button>
-                        ))}
+        {/* Settings Panel */}
+        {showSettings && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-950/40 backdrop-blur-md" onClick={() => setShowSettings(false)}>
+                <div className="w-full max-w-lg bg-white dark:bg-slate-900 rounded-[3rem] p-6 md:p-10 shadow-2xl relative" onClick={e => e.stopPropagation()}>
+                    <button onClick={() => setShowSettings(false)} className="absolute top-8 right-8 text-slate-400 p-2"><X /></button>
+                    <h2 className="text-2xl md:text-3xl font-black mb-8">Profile Settings</h2>
+                    <div className="space-y-8">
+                        <div className="flex flex-col items-center gap-4">
+                            <div className="relative group cursor-pointer" onClick={() => fileInputRef.current?.click()}>
+                                <img src={myProfile?.avatar} className="w-24 h-24 md:w-32 md:h-32 rounded-[2rem] object-cover border-4 border-orange-500/20" alt="" />
+                                <div className="absolute inset-0 bg-black/40 rounded-[2rem] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <Camera className="text-white" />
+                                </div>
+                                <input type="file" ref={fileInputRef} onChange={handleAvatarChange} className="hidden" accept="image/*" />
+                            </div>
+                            <div className="text-center">
+                                <h3 className="text-xl font-black">{myProfile?.name}</h3>
+                                <p className="text-sm opacity-50 font-bold">{myProfile?.phone}</p>
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <button onClick={() => setIsDarkMode(!isDarkMode)} className="py-4 bg-slate-100 dark:bg-slate-800 rounded-2xl font-bold flex items-center justify-center gap-3">
+                                {isDarkMode ? <Sun /> : <Moon />} {isDarkMode ? 'Light' : 'Dark'}
+                            </button>
+                            <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="py-4 bg-rose-50 text-rose-500 dark:bg-rose-500/10 rounded-2xl font-bold">Sign Out</button>
+                        </div>
                     </div>
                 </div>
             </div>
         )}
       </main>
-
-      {showSettings && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-950/40 backdrop-blur-md" onClick={() => setShowSettings(false)}>
-            <div className="w-full max-w-lg bg-white dark:bg-slate-900 rounded-[3rem] p-10 shadow-2xl relative" onClick={e => e.stopPropagation()}>
-                <button onClick={() => setShowSettings(false)} className="absolute top-8 right-8 text-slate-400 p-2"><X /></button>
-                <h2 className="text-3xl font-black mb-8">Settings</h2>
-                <div className="space-y-8">
-                    <div className="space-y-3">
-                        <label className="text-[10px] font-black uppercase tracking-[0.2em] opacity-40">Profile</label>
-                        <div className="flex items-center gap-6 p-6 bg-slate-50 dark:bg-slate-800 rounded-3xl group relative">
-                            <div className="relative cursor-pointer overflow-hidden rounded-2xl w-24 h-24 shadow-lg border-2 border-white dark:border-slate-700" onClick={() => fileInputRef.current?.click()}>
-                                <img src={myProfile?.avatar} className="w-full h-full object-cover transition-transform group-hover:scale-110" alt="" />
-                                <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <Camera className="w-8 h-8 text-white" />
-                                </div>
-                            </div>
-                            <input type="file" ref={fileInputRef} onChange={handleAvatarChange} className="hidden" accept="image/*" />
-                            <div>
-                                <h3 className="text-xl font-black">{myProfile?.name}</h3>
-                                <p className="text-sm opacity-50 font-bold">{myProfile?.phone}</p>
-                                <button onClick={() => fileInputRef.current?.click()} className="mt-2 text-xs font-black text-orange-500 uppercase tracking-widest flex items-center gap-2 hover:opacity-70 transition-opacity">
-                                    <Upload className="w-3 h-3" /> Change Photo
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <button onClick={() => setIsDarkMode(!isDarkMode)} className="w-full py-4 bg-slate-100 dark:bg-slate-800 rounded-2xl font-bold flex items-center justify-center gap-3">
-                        {isDarkMode ? <Sun /> : <Moon />} {isDarkMode ? 'Light Mode' : 'Dark Mode'}
-                    </button>
-                    <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="w-full py-4 bg-rose-50 text-rose-500 rounded-2xl font-bold">Sign Out</button>
-                </div>
-            </div>
-        </div>
-      )}
     </div>
   );
 }
