@@ -27,49 +27,23 @@ export const dbService = {
       messages.push(message);
     }
     
-    // Attempt to save with quota handling
     try {
       localStorage.setItem(STORAGE_KEY_MESSAGES, JSON.stringify(messages));
     } catch (e) {
-      console.warn("Storage quota exceeded, pruning old messages...");
-      // If quota exceeded, remove oldest 40% of messages
       if (messages.length > 10) {
         messages = messages.slice(Math.floor(messages.length * 0.4));
-        try {
-          localStorage.setItem(STORAGE_KEY_MESSAGES, JSON.stringify(messages));
-        } catch (retryError) {
-          // If still failing, clear everything except the last 5 messages as a last resort
-          localStorage.setItem(STORAGE_KEY_MESSAGES, JSON.stringify(messages.slice(-5)));
-        }
+        localStorage.setItem(STORAGE_KEY_MESSAGES, JSON.stringify(messages));
       }
     }
     dbService.updateChatSession(message.chatId, message.text || (message.media ? `[${message.media.type}]` : ''), message.timestamp);
   },
 
-  addReaction: (messageId: string, userId: string, emoji: string): void => {
+  deleteMessage: (messageId: string): void => {
     const data = localStorage.getItem(STORAGE_KEY_MESSAGES);
     if (!data) return;
     let messages: Message[] = JSON.parse(data);
-    const msg = messages.find(m => m.id === messageId);
-    if (msg) {
-      if (!msg.reactions) msg.reactions = {};
-      if (!msg.reactions[emoji]) msg.reactions[emoji] = [];
-      
-      const userIndex = msg.reactions[emoji].indexOf(userId);
-      if (userIndex > -1) {
-        msg.reactions[emoji].splice(userIndex, 1);
-        if (msg.reactions[emoji].length === 0) delete msg.reactions[emoji];
-      } else {
-        msg.reactions[emoji].push(userId);
-      }
-      try {
-        localStorage.setItem(STORAGE_KEY_MESSAGES, JSON.stringify(messages));
-      } catch (e) {
-        // Quota error handling for reactions too
-        messages = messages.slice(Math.floor(messages.length * 0.2));
-        localStorage.setItem(STORAGE_KEY_MESSAGES, JSON.stringify(messages));
-      }
-    }
+    messages = messages.filter(m => m.id !== messageId);
+    localStorage.setItem(STORAGE_KEY_MESSAGES, JSON.stringify(messages));
   },
 
   getChats: (): ChatSession[] => {
@@ -85,13 +59,29 @@ export const dbService = {
   saveChats: (chats: ChatSession[]): void => {
     try {
       localStorage.setItem(STORAGE_KEY_CHATS, JSON.stringify(chats));
-    } catch (e) {
-      // Chats are usually small, but if this fails, we just don't save
+    } catch (e) {}
+  },
+
+  deleteChat: (chatId: string): void => {
+    // Delete Chat Session
+    let chats = dbService.getChats();
+    chats = chats.filter(c => c.id !== chatId);
+    dbService.saveChats(chats);
+
+    // Delete associated messages
+    const data = localStorage.getItem(STORAGE_KEY_MESSAGES);
+    if (data) {
+      let messages: Message[] = JSON.parse(data);
+      messages = messages.filter(m => m.chatId !== chatId);
+      localStorage.setItem(STORAGE_KEY_MESSAGES, JSON.stringify(messages));
     }
   },
 
   updateChatSession: (chatId: string, lastMsg: string, time: number): void => {
     const chats = dbService.getChats();
+    const chatExists = chats.find(c => c.id === chatId);
+    if (!chatExists) return;
+
     const updated = chats.map(c => 
       c.id === chatId ? { ...c, lastMessage: lastMsg, lastTimestamp: time } : c
     );
@@ -102,7 +92,7 @@ export const dbService = {
 const defaultChats: ChatSession[] = [
   {
     id: 'ai-gemini',
-    name: 'ChatNest AI Assistant',
+    name: 'Neo AI Assistant',
     avatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=chatnest-ai',
     phone: 'NEST-AI-LINK',
     lastMessage: 'Welcome to your new nest! How can I help you today?',
