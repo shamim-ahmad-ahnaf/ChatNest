@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef, memo } from 'react';
+import React, { useState, useEffect, useRef, memo, useCallback } from 'react';
 import { Peer, DataConnection, MediaConnection } from "peerjs";
 import { Message, ChatSession, MessageStatus, UserProfile } from './types';
 import { dbService } from './services/dbService';
@@ -10,7 +10,7 @@ import {
     Zap, Edit3, Settings2, Moon, Sun, ExternalLink,
     UserPlus2, Copy, Check, Headphones, Mic, Paperclip, 
     Video as VideoIcon, MicOff, CameraOff, Globe, Trash2,
-    Sparkles // Added missing Sparkles icon
+    Sparkles 
 } from 'lucide-react';
 
 // Memoized Message Bubble for performance
@@ -58,7 +58,6 @@ const MessageBubble = memo(({ msg, isMe, onEdit, onDelete }: {
   );
 });
 
-// Optimized Chat Input to prevent full app re-renders on keystrokes
 const ChatInput = ({ onSend, onStartRecording, onStopRecording, isRecording, onFileSelect, editingMsg, cancelEdit }: any) => {
   const [text, setText] = useState('');
   
@@ -81,7 +80,7 @@ const ChatInput = ({ onSend, onStartRecording, onStopRecording, isRecording, onF
           <button onClick={cancelEdit} className="text-orange-500 hover:bg-orange-500/10 p-1 rounded-lg"><X className="w-4 h-4" /></button>
         </div>
       )}
-      <div className="max-w-4xl mx-auto flex items-end gap-3 p-2 bg-slate-50 dark:bg-slate-900 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 shadow-inner relative transition-all focus-within:ring-2 ring-orange-500/20">
+      <div className="max-w-4xl mx-auto flex items-end gap-3 p-2 bg-slate-50 dark:bg-slate-900 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 shadow-inner relative focus-within:ring-2 ring-orange-500/20 transition-all">
         <label className="p-3.5 text-slate-400 hover:text-orange-500 cursor-pointer transition-colors">
           <Paperclip className="w-6 h-6" />
           <input type="file" className="hidden" onChange={onFileSelect} />
@@ -136,6 +135,7 @@ export default function App() {
   const audioChunksRef = useRef<Blob[]>([]);
 
   const activeChat = chats.find(c => c.id === activeChatId);
+  const isAIChat = activeChatId === 'ai-gemini';
 
   useEffect(() => {
     const checkApiKey = async () => {
@@ -144,21 +144,141 @@ export default function App() {
     checkApiKey();
   }, []);
 
+  // Peer Connection & Signaling Logic
   useEffect(() => {
     if (isRegistered && myProfile) {
       const peer = new Peer(myProfile.id);
       peerRef.current = peer;
+
+      peer.on('open', (id) => console.log('Peer connected with ID:', id));
+
       peer.on('connection', (conn) => {
-        conn.on('open', () => {
-          connectionsRef.current[conn.peer] = conn;
-          conn.send({ type: 'profile_sync', profile: myProfile });
-        });
-        conn.on('data', (data: any) => handlePeerData(data, conn.peer));
+        setupConnectionListeners(conn);
       });
-      peer.on('call', (call) => setIncomingCall({ peerId: call.peer, type: call.metadata?.type || 'audio', call }));
+
+      peer.on('call', (call) => {
+        // AI chat shouldn't receive calls, but guarding just in case
+        if (call.peer === 'ai-gemini') {
+          call.close();
+          return;
+        }
+        setIncomingCall({ peerId: call.peer, type: call.metadata?.type || 'audio', call });
+      });
+      
+      peer.on('error', (err) => {
+        console.error('Peer error:', err);
+        if (err.type === 'peer-unavailable') {
+          // Do not show error for internal AI ID
+          if (!err.message.includes('ai-gemini')) {
+            alert('এই ID টি খুঁজে পাওয়া যায়নি বা অফলাইনে আছে।');
+          }
+        }
+      });
+
       return () => peer.destroy();
     }
   }, [isRegistered, myProfile?.id]);
+
+  const setupConnectionListeners = (conn: DataConnection) => {
+    // Guard against internal IDs
+    if (conn.peer === 'ai-gemini') {
+      conn.close();
+      return;
+    }
+
+    conn.on('open', () => {
+      console.log('Connection opened with:', conn.peer);
+      connectionsRef.current[conn.peer] = conn;
+      if (myProfile) {
+        conn.send({ type: 'profile_sync', profile: myProfile });
+      }
+    });
+
+    conn.on('data', (data: any) => handlePeerData(data, conn.peer));
+
+    conn.on('close', () => {
+      console.log('Connection closed:', conn.peer);
+      delete connectionsRef.current[conn.peer];
+    });
+
+    conn.on('error', (err) => console.error('Connection error:', err));
+  };
+
+  const handlePeerData = (data: any, senderPeerId: string) => {
+    if (data.type === 'message') {
+        handleReceivedMessage(data.message, senderPeerId);
+    } else if (data.type === 'profile_sync') {
+        updateChatWithProfile(data.profile);
+    } else if (data.type === 'message_edit') {
+        handleSyncEdit(data.msgId, data.text);
+    } else if (data.type === 'message_delete') {
+        handleSyncDelete(data.msgId);
+    }
+  };
+
+  const updateChatWithProfile = (profile: UserProfile) => {
+    setChats(prev => {
+      const existing = prev.find(c => c.id === profile.id);
+      let updated;
+      if (existing) {
+        updated = prev.map(c => c.id === profile.id ? { ...c, name: profile.name, avatar: profile.avatar } : c);
+      } else {
+        updated = [{ 
+          id: profile.id, 
+          name: profile.name, 
+          avatar: profile.avatar, 
+          phone: profile.phone, 
+          isOnline: true, 
+          type: 'contact', 
+          unreadCount: 0, 
+          lastMessage: 'Link established' 
+        }, ...prev];
+      }
+      dbService.saveChats(updated);
+      return updated;
+    });
+  };
+
+  const handleReceivedMessage = (msg: Message, senderPeerId: string) => {
+    const correctedMsg = { ...msg, chatId: senderPeerId };
+    dbService.saveMessage(correctedMsg);
+    setChats(dbService.getChats());
+    if (activeChatId === senderPeerId) {
+      setMessages(prev => [...prev, correctedMsg]);
+    }
+  };
+
+  const handleSyncEdit = (msgId: string, text: string) => {
+    setMessages(prev => prev.map(m => m.id === msgId ? { ...m, text, isEdited: true } : m));
+    setChats(dbService.getChats());
+  };
+
+  const handleSyncDelete = (msgId: string) => {
+    setMessages(prev => prev.filter(m => m.id !== msgId));
+    dbService.deleteMessage(msgId);
+    setChats(dbService.getChats());
+  };
+
+  const connectToPeer = (id: string) => {
+    const targetId = id.trim();
+    // Guard: Don't try to connect to AI assistant via PeerJS
+    if (targetId === 'ai-gemini') {
+      setActiveChatId('ai-gemini');
+      setShowConnectModal(false);
+      setTargetPeerId('');
+      return;
+    }
+
+    if (!peerRef.current || !targetId || targetId === myProfile?.id) return;
+    
+    console.log('Initiating connection to:', targetId);
+    const conn = peerRef.current.connect(targetId);
+    setupConnectionListeners(conn);
+    
+    setActiveChatId(targetId);
+    setShowConnectModal(false);
+    setTargetPeerId('');
+  };
 
   useEffect(() => {
     if (isDarkMode) document.documentElement.classList.add('dark');
@@ -179,42 +299,6 @@ export default function App() {
     if (activeCall?.stream && localVideoRef.current) localVideoRef.current.srcObject = activeCall.stream;
   }, [activeCall]);
 
-  const handlePeerData = (data: any, peerId: string) => {
-    if (data.type === 'message') handleReceivedMessage(data.message, peerId);
-    else if (data.type === 'profile_sync') updateChatWithProfile(data.profile);
-    else if (data.type === 'message_edit') handleSyncEdit(data.msgId, data.text);
-    else if (data.type === 'message_delete') handleSyncDelete(data.msgId);
-  };
-
-  const updateChatWithProfile = (profile: UserProfile) => {
-    setChats(prev => {
-      const existing = prev.find(c => c.id === profile.id);
-      let updated;
-      if (existing) updated = prev.map(c => c.id === profile.id ? { ...c, name: profile.name, avatar: profile.avatar } : c);
-      else updated = [{ id: profile.id, name: profile.name, avatar: profile.avatar, phone: profile.phone, isOnline: true, type: 'contact', unreadCount: 0, lastMessage: 'Link established' }, ...prev];
-      dbService.saveChats(updated);
-      return updated;
-    });
-  };
-
-  const handleReceivedMessage = (msg: Message, peerId: string) => {
-    const correctedMsg = { ...msg, chatId: peerId };
-    dbService.saveMessage(correctedMsg);
-    setChats(dbService.getChats());
-    if (activeChatId === peerId) setMessages(prev => [...prev, correctedMsg]);
-  };
-
-  const handleSyncEdit = (msgId: string, text: string) => {
-    setMessages(prev => prev.map(m => m.id === msgId ? { ...m, text, isEdited: true } : m));
-    setChats(dbService.getChats());
-  };
-
-  const handleSyncDelete = (msgId: string) => {
-    setMessages(prev => prev.filter(m => m.id !== msgId));
-    dbService.deleteMessage(msgId);
-    setChats(dbService.getChats());
-  };
-
   const handleSendMessage = async (text: string, media?: Message['media']) => {
     if (!activeChatId || !myProfile) return;
 
@@ -222,20 +306,47 @@ export default function App() {
       const updatedMessages = messages.map(m => m.id === editingMsg.id ? { ...m, text, isEdited: true } : m);
       setMessages(updatedMessages);
       dbService.saveMessage(updatedMessages.find(m => m.id === editingMsg.id)!);
-      const conn = connectionsRef.current[activeChatId];
-      if (conn?.open) conn.send({ type: 'message_edit', msgId: editingMsg.id, text });
+      
+      if (!isAIChat) {
+        const conn = connectionsRef.current[activeChatId];
+        if (conn?.open) conn.send({ type: 'message_edit', msgId: editingMsg.id, text });
+      }
+      
       setEditingMsg(null);
       setChats(dbService.getChats());
       return;
     }
     
-    const newMessage: Message = { id: `msg-${Date.now()}-${Math.random().toString(36).substr(2,4)}`, chatId: activeChatId, senderId: myProfile.id, senderName: myProfile.name, senderAvatar: myProfile.avatar, text, timestamp: Date.now(), status: MessageStatus.SENT, media };
+    const newMessage: Message = { 
+        id: `msg-${Date.now()}-${Math.random().toString(36).substr(2,4)}`, 
+        chatId: activeChatId, 
+        senderId: myProfile.id, 
+        senderName: myProfile.name, 
+        senderAvatar: myProfile.avatar, 
+        text, 
+        timestamp: Date.now(), 
+        status: MessageStatus.SENT, 
+        media 
+    };
+
     setMessages(prev => [...prev, newMessage]);
     dbService.saveMessage(newMessage);
-    if (activeChatId === 'ai-gemini') handleAIResponse(text);
-    else {
+
+    if (isAIChat) {
+        handleAIResponse(text);
+    } else {
       const conn = connectionsRef.current[activeChatId];
-      if (conn?.open) conn.send({ type: 'message', message: newMessage });
+      if (conn?.open) {
+        conn.send({ type: 'message', message: newMessage });
+      } else {
+        // Try to re-connect if connection dropped
+        console.log('Connection lost, attempting to re-connect...');
+        const newConn = peerRef.current!.connect(activeChatId);
+        setupConnectionListeners(newConn);
+        newConn.on('open', () => {
+            newConn.send({ type: 'message', message: newMessage });
+        });
+      }
     }
     setChats(dbService.getChats());
   };
@@ -244,8 +355,12 @@ export default function App() {
     if (!window.confirm("ম্যাসেজটি ডিলিট করতে চান?")) return;
     setMessages(prev => prev.filter(m => m.id !== msgId));
     dbService.deleteMessage(msgId);
-    const conn = connectionsRef.current[activeChatId!];
-    if (conn?.open) conn.send({ type: 'message_delete', msgId });
+    
+    if (!isAIChat) {
+      const conn = connectionsRef.current[activeChatId!];
+      if (conn?.open) conn.send({ type: 'message_delete', msgId });
+    }
+    
     setChats(dbService.getChats());
   };
 
@@ -277,30 +392,33 @@ export default function App() {
     const fd = new FormData(e.currentTarget as HTMLFormElement);
     const name = fd.get('name') as string;
     const phone = fd.get('phone') as string;
-    const profile: UserProfile = { id: `nest-${phone.replace(/[^0-9]/g, '') || Math.random().toString(36).substr(2, 6)}`, name, phone, avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${name}`, bio: 'Hello!', status: 'online' };
+    const profile: UserProfile = { 
+        id: `nest-${phone.replace(/[^0-9]/g, '') || Math.random().toString(36).substr(2, 6)}`, 
+        name, 
+        phone, 
+        avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${name}`, 
+        bio: 'Hello!', 
+        status: 'online' 
+    };
     setMyProfile(profile);
     localStorage.setItem('chatnest_profile', JSON.stringify(profile));
     setIsRegistered(true);
   };
 
-  // Added missing updateProfile function
   const updateProfile = (updates: Partial<UserProfile>) => {
     if (!myProfile) return;
     const updated = { ...myProfile, ...updates };
     setMyProfile(updated);
     localStorage.setItem('chatnest_profile', JSON.stringify(updated));
-    // Inform active connections of profile change
     if (peerRef.current?.open) {
-      Object.values(connectionsRef.current).forEach(conn => {
-        if (conn.open) {
-          conn.send({ type: 'profile_sync', profile: updated });
-        }
+      (Object.values(connectionsRef.current) as DataConnection[]).forEach(conn => {
+        if (conn.open) conn.send({ type: 'profile_sync', profile: updated });
       });
     }
   };
 
   const startCall = async (type: 'audio' | 'video') => {
-    if (!activeChatId || !peerRef.current) return;
+    if (!activeChatId || !peerRef.current || isAIChat) return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: type === 'video' });
       const call = peerRef.current.call(activeChatId, stream, { metadata: { type } });
@@ -369,20 +487,21 @@ export default function App() {
 
   return (
     <div className={`flex h-screen bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-jakarta selection:bg-orange-500/30`}>
+      {/* Sidebar */}
       <aside className={`${activeChatId ? 'hidden md:flex' : 'flex'} w-full md:w-80 lg:w-96 flex-col border-r border-slate-100 dark:border-slate-800/50 bg-slate-50/50 dark:bg-slate-900/50 backdrop-blur-sm`}>
         <div className="p-6 flex flex-col h-full">
           <div className="flex items-center justify-between mb-8">
             <h1 className="text-2xl font-black text-orange-500 flex items-center gap-2"><Zap className="w-5 h-5" /> ChatNest</h1>
             <div className="flex gap-2">
-              <button onClick={() => setShowConnectModal(true)} className="p-2.5 bg-orange-500/10 text-orange-500 rounded-xl"><UserPlus2 className="w-5 h-5" /></button>
-              <button onClick={() => setShowSettings(true)} className="w-10 h-10 rounded-xl overflow-hidden shadow-sm border border-slate-200 dark:border-slate-700"><img src={myProfile?.avatar} className="w-full h-full object-cover" /></button>
+              <button onClick={() => setShowConnectModal(true)} className="p-2.5 bg-orange-500/10 text-orange-500 rounded-xl hover:scale-105 transition-all"><UserPlus2 className="w-5 h-5" /></button>
+              <button onClick={() => setShowSettings(true)} className="w-10 h-10 rounded-xl overflow-hidden shadow-sm border border-slate-200 dark:border-slate-700 transition-all"><img src={myProfile?.avatar} className="w-full h-full object-cover" /></button>
             </div>
           </div>
           <div className="relative mb-6">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input type="text" placeholder="সার্চ করুন..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-white dark:bg-slate-800 rounded-2xl py-3.5 pl-12 pr-4 text-sm outline-none shadow-sm border border-slate-100 dark:border-slate-700/50" />
+            <input type="text" placeholder="সার্চ করুন..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-white dark:bg-slate-800 rounded-2xl py-3.5 pl-12 pr-4 text-sm outline-none shadow-sm border border-slate-100 dark:border-slate-700/50 focus:ring-2 ring-orange-500/20" />
           </div>
-          <div className="space-y-2 overflow-y-auto flex-1 pr-2">
+          <div className="space-y-2 overflow-y-auto flex-1 pr-2 custom-scrollbar">
             {chats.filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase())).map(chat => (
               <div key={chat.id} onClick={() => setActiveChatId(chat.id)} className={`group flex items-center gap-4 p-4 cursor-pointer rounded-[2rem] transition-all relative ${activeChatId === chat.id ? 'bg-orange-500 text-white shadow-xl shadow-orange-500/30' : 'hover:bg-white dark:hover:bg-slate-800 shadow-sm'}`}>
                 <div className="relative">
@@ -399,6 +518,7 @@ export default function App() {
         </div>
       </aside>
 
+      {/* Main Content */}
       <main className={`${activeChatId ? 'flex' : 'hidden md:flex'} flex-1 flex flex-col h-full bg-slate-50/20 dark:bg-transparent`}>
         {activeChat ? (
           <>
@@ -408,16 +528,20 @@ export default function App() {
                 <img src={activeChat.avatar} className="w-11 h-11 rounded-xl object-cover ring-2 ring-orange-500/10" />
                 <div>
                   <h2 className="font-black text-slate-800 dark:text-white flex items-center gap-2">{activeChat.name}</h2>
-                  <p className="text-[10px] text-orange-500 font-black uppercase tracking-widest">Neural Link Secure</p>
+                  <p className="text-[10px] text-orange-500 font-black uppercase tracking-widest">
+                    {isAIChat ? 'Neural Brain Core' : 'Neural Link Secure'}
+                  </p>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
-                <button onClick={() => startCall('audio')} className="p-3 text-slate-400 hover:text-orange-500 transition-all"><Phone className="w-5 h-5" /></button>
-                <button onClick={() => startCall('video')} className="p-3 text-slate-400 hover:text-orange-500 transition-all"><VideoIcon className="w-5 h-5" /></button>
-              </div>
+              {!isAIChat && (
+                <div className="flex items-center gap-2">
+                  <button onClick={() => startCall('audio')} className="p-3 text-slate-400 hover:text-orange-500 hover:bg-orange-500/10 rounded-xl transition-all"><Phone className="w-5 h-5" /></button>
+                  <button onClick={() => startCall('video')} className="p-3 text-slate-400 hover:text-orange-500 hover:bg-orange-500/10 rounded-xl transition-all"><VideoIcon className="w-5 h-5" /></button>
+                </div>
+              )}
             </header>
 
-            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+            <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
               {messages.map((msg) => (
                 <MessageBubble 
                   key={msg.id} 
@@ -457,12 +581,14 @@ export default function App() {
         )}
       </main>
 
+      {/* Modals */}
       {showConnectModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-950/60 backdrop-blur-md animate-in fade-in" onClick={() => setShowConnectModal(false)}>
           <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-[3rem] p-10 shadow-2xl relative border border-orange-500/10" onClick={e => e.stopPropagation()}>
             <h2 className="text-3xl font-black mb-8">লিঙ্ক করুন</h2>
+            <p className="text-xs text-slate-400 mb-4 font-bold uppercase tracking-widest">বন্ধুর ID এখানে লিখুন</p>
             <input autoFocus value={targetPeerId} onChange={e => setTargetPeerId(e.target.value)} type="text" placeholder="Nest ID এখানে দিন..." className="w-full bg-slate-50 dark:bg-slate-800 p-5 rounded-2xl font-bold mb-6 outline-none border-2 border-transparent focus:border-orange-500 transition-all" />
-            <button onClick={() => { if(!peerRef.current || targetPeerId === myProfile?.id) return; const conn = peerRef.current.connect(targetPeerId); conn.on('open', () => { connectionsRef.current[targetPeerId] = conn; conn.send({ type: 'profile_sync', profile: myProfile }); setActiveChatId(targetPeerId); setShowConnectModal(false); }); }} className="w-full py-5 bg-orange-500 text-white rounded-2xl font-black text-lg">কানেক্ট করুন</button>
+            <button onClick={() => connectToPeer(targetPeerId)} className="w-full py-5 bg-orange-500 text-white rounded-2xl font-black text-lg shadow-xl shadow-orange-500/30">কানেক্ট করুন</button>
           </div>
         </div>
       )}
@@ -473,14 +599,20 @@ export default function App() {
             <h2 className="text-4xl font-black mb-10 flex items-center gap-4"><Settings2 className="w-10 h-10 text-orange-500" /> সেটিংস</h2>
             <div className="flex flex-col items-center gap-10">
               <div className="relative group">
-                <img src={myProfile?.avatar} className="w-36 h-36 rounded-[3rem] object-cover" />
+                <img src={myProfile?.avatar} className="w-36 h-36 rounded-[3rem] object-cover border-4 border-orange-500/20" />
                 <label className="absolute inset-0 bg-black/50 rounded-[3rem] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all cursor-pointer"><Camera className="text-white w-8 h-8" /><input type="file" className="hidden" accept="image/*" onChange={(e:any) => { const file = e.target.files?.[0]; if(file) { const reader = new FileReader(); reader.onloadend = () => updateProfile({ avatar: reader.result as string }); reader.readAsDataURL(file); } }} /></label>
               </div>
               <div className="w-full space-y-4">
-                <div className="bg-slate-50 dark:bg-slate-800 p-5 rounded-3xl flex justify-between items-center"><code className="font-bold">{myProfile?.id}</code><button onClick={() => { navigator.clipboard.writeText(myProfile!.id); setCopyStatus(true); setTimeout(()=>setCopyStatus(false),2000); }} className="p-3 bg-white dark:bg-slate-700 rounded-xl">{copyStatus ? <Check className="text-emerald-500"/> : <Copy/>}</button></div>
+                <div className="bg-slate-50 dark:bg-slate-800 p-5 rounded-3xl flex justify-between items-center">
+                  <div className="flex flex-col">
+                    <span className="text-[10px] font-black text-orange-500 uppercase">আপনার Nest ID</span>
+                    <code className="font-bold">{myProfile?.id}</code>
+                  </div>
+                  <button onClick={() => { navigator.clipboard.writeText(myProfile!.id); setCopyStatus(true); setTimeout(()=>setCopyStatus(false),2000); }} className="p-3 bg-white dark:bg-slate-700 rounded-xl">{copyStatus ? <Check className="text-emerald-500"/> : <Copy className="w-5 h-5"/>}</button>
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-4 w-full">
-                <button onClick={() => setIsDarkMode(!isDarkMode)} className="py-5 bg-slate-900 text-white rounded-[2rem] font-black">{isDarkMode ? 'লাইট মোড' : 'ডার্ক মোড'}</button>
+                <button onClick={() => setIsDarkMode(!isDarkMode)} className={`py-5 rounded-[2rem] font-black ${isDarkMode ? 'bg-white text-slate-900' : 'bg-slate-900 text-white'}`}>{isDarkMode ? 'লাইট মোড' : 'ডার্ক মোড'}</button>
                 <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="py-5 bg-rose-50 text-rose-500 rounded-[2rem] font-black">রিসেট অ্যাকাউন্ট</button>
               </div>
             </div>
@@ -489,18 +621,19 @@ export default function App() {
       )}
 
       {incomingCall && (
-        <div className="fixed inset-0 z-[200] bg-slate-950/95 flex flex-col items-center justify-center text-white backdrop-blur-2xl p-10 text-center animate-in zoom-in-95 will-change-transform">
-          <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${incomingCall.peerId}`} className="w-36 h-36 rounded-[3rem] mb-10" />
+        <div className="fixed inset-0 z-[200] bg-slate-950/95 flex flex-col items-center justify-center text-white backdrop-blur-2xl p-10 text-center animate-in zoom-in-95">
+          <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${incomingCall.peerId}`} className="w-36 h-36 rounded-[3rem] mb-10 border-4 border-orange-500/20" />
           <h2 className="text-4xl font-black mb-3">{incomingCall.peerId}</h2>
+          <p className="text-emerald-500 animate-pulse font-bold uppercase tracking-widest">Incoming Call...</p>
           <div className="flex gap-12 mt-20">
-            <button onClick={endCall} className="w-24 h-24 bg-rose-500 rounded-full flex items-center justify-center"><PhoneOff className="w-10 h-10" /></button>
-            <button onClick={answerCall} className="w-24 h-24 bg-emerald-500 rounded-full flex items-center justify-center"><Phone className="w-10 h-10" /></button>
+            <button onClick={endCall} className="w-24 h-24 bg-rose-500 rounded-full flex items-center justify-center shadow-xl shadow-rose-500/20"><PhoneOff className="w-10 h-10" /></button>
+            <button onClick={answerCall} className="w-24 h-24 bg-emerald-500 rounded-full flex items-center justify-center shadow-xl shadow-emerald-500/20"><Phone className="w-10 h-10" /></button>
           </div>
         </div>
       )}
 
       {activeCall && (
-        <div className="fixed inset-0 z-[200] bg-slate-950 flex flex-col items-center justify-center overflow-hidden will-change-transform">
+        <div className="fixed inset-0 z-[200] bg-slate-950 flex flex-col items-center justify-center overflow-hidden">
           {activeCall.type === 'video' ? (
             <div className="w-full h-full relative">
               <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover" />
@@ -510,11 +643,13 @@ export default function App() {
             </div>
           ) : (
             <div className="flex flex-col items-center">
-              <Headphones className="w-24 h-24 text-orange-500 animate-bounce mb-12" />
+              <div className="w-48 h-48 bg-orange-500/10 rounded-full flex items-center justify-center mb-12 animate-pulse">
+                <Headphones className="w-24 h-24 text-orange-500" />
+              </div>
               <h2 className="text-4xl font-black text-white">ভয়েস কল চলছে</h2>
             </div>
           )}
-          <div className="absolute bottom-16 flex gap-10 bg-white/10 backdrop-blur-2xl p-8 rounded-[3rem] border border-white/10">
+          <div className="absolute bottom-16 flex gap-10 bg-white/10 backdrop-blur-2xl p-8 rounded-[3rem] border border-white/10 shadow-2xl">
             <button onClick={endCall} className="w-20 h-20 bg-rose-500 text-white rounded-full flex items-center justify-center shadow-xl"><PhoneOff className="w-9 h-9" /></button>
           </div>
         </div>
