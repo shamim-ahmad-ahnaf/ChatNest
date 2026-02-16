@@ -16,17 +16,8 @@ import {
 
 const THEME_COLORS = [{ name: 'orange', class: 'orange-500', hex: '#f97316' }];
 
-// Fix: Using AIStudio interface and optional modifier to match environment declaration and resolve TS errors
-declare global {
-  interface AIStudio {
-    hasSelectedApiKey(): Promise<boolean>;
-    openSelectKey(): Promise<void>;
-  }
-
-  interface Window {
-    aistudio?: AIStudio;
-  }
-}
+// AIStudio types are assumed to be provided by the environment, 
+// explicit declaration removed to fix "Duplicate identifier" errors.
 
 export default function App() {
   const [isRegistered, setIsRegistered] = useState(() => !!localStorage.getItem('chatnest_profile'));
@@ -47,6 +38,9 @@ export default function App() {
   const [copyStatus, setCopyStatus] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
 
+  // API Key selection state
+  const [hasApiKey, setHasApiKey] = useState(true);
+
   // Editing state
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
 
@@ -63,6 +57,17 @@ export default function App() {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const activeChat = chats.find(c => c.id === activeChatId);
+
+  // Check for existing API key selection on mount
+  useEffect(() => {
+    const checkApiKey = async () => {
+      if (window.aistudio) {
+        const hasKey = await window.aistudio.hasSelectedApiKey();
+        setHasApiKey(hasKey);
+      }
+    };
+    checkApiKey();
+  }, []);
 
   useEffect(() => {
     if (isRegistered && myProfile) {
@@ -131,10 +136,11 @@ export default function App() {
   };
 
   const handleReceivedMessage = (msg: Message, peerId: string) => {
-    dbService.saveMessage(msg);
+    const correctedMsg = { ...msg, chatId: peerId };
+    dbService.saveMessage(correctedMsg);
     setChats(dbService.getChats());
-    if (activeChatId === peerId || msg.chatId === activeChatId) {
-      setMessages(prev => [...prev, msg]);
+    if (activeChatId === peerId) {
+      setMessages(prev => [...prev, correctedMsg]);
     }
   };
 
@@ -156,7 +162,6 @@ export default function App() {
     if ((!text.trim() && !media) || !activeChatId || !myProfile) return;
 
     if (editingMsgId) {
-      // Logic for editing existing message
       const updatedMessages = messages.map(m => m.id === editingMsgId ? { ...m, text, isEdited: true } : m);
       setMessages(updatedMessages);
       const msgToUpdate = updatedMessages.find(m => m.id === editingMsgId)!;
@@ -256,7 +261,6 @@ export default function App() {
     setChats(dbService.getChats());
   };
 
-  // Profile management & registration remain similar, adding ID visibility
   const handleRegister = (e: React.FormEvent) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget as HTMLFormElement);
@@ -271,6 +275,14 @@ export default function App() {
     setMyProfile(newProfile);
     localStorage.setItem('chatnest_profile', JSON.stringify(newProfile));
     setIsRegistered(true);
+  };
+
+  const handleOpenKeySelector = async () => {
+    if (window.aistudio) {
+      await window.aistudio.openSelectKey();
+      // Per guidelines, assume success after triggering the dialog to avoid race conditions
+      setHasApiKey(true);
+    }
   };
 
   const updateProfile = (updates: Partial<UserProfile>) => {
@@ -301,6 +313,16 @@ export default function App() {
     const reader = new FileReader();
     reader.onloadend = () => {
       handleSendMessage('', { type: file.type.startsWith('image/') ? 'image' : 'file', url: reader.result as string, mimeType: file.type, fileName: file.name });
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      updateProfile({ avatar: reader.result as string });
     };
     reader.readAsDataURL(file);
   };
@@ -349,6 +371,38 @@ export default function App() {
                 </form>
             </div>
         </div>
+    );
+  }
+
+  // API Key selection screen - Mandatory for Gemini 3 / Veo features
+  if (!hasApiKey) {
+    return (
+      <div className="h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-6 text-center">
+        <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-[3rem] p-10 shadow-2xl animate-in zoom-in-95">
+          <div className="w-20 h-20 bg-orange-500/10 rounded-3xl flex items-center justify-center mx-auto mb-8">
+            <Sparkles className="w-10 h-10 text-orange-500" />
+          </div>
+          <h2 className="text-3xl font-black mb-4">API Key Required</h2>
+          <p className="text-slate-500 dark:text-slate-400 mb-8 font-medium">
+            Neo AI features and video generation require a valid Gemini API key from a paid project.
+          </p>
+          <div className="bg-slate-50 dark:bg-slate-800 p-4 rounded-2xl mb-8 text-left">
+            <p className="text-[10px] font-black uppercase opacity-50 mb-1">Important</p>
+            <p className="text-xs font-bold leading-relaxed">
+              Please select an API key from a project with billing enabled. View the 
+              <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener noreferrer" className="text-orange-500 ml-1 hover:underline flex inline-flex items-center gap-1">
+                Billing Documentation <ExternalLink className="w-2.5 h-2.5" />
+              </a>
+            </p>
+          </div>
+          <button 
+            onClick={handleOpenKeySelector} 
+            className="w-full py-5 bg-orange-500 text-white rounded-2xl font-black text-lg shadow-xl hover:scale-[1.02] transition-transform active:scale-95"
+          >
+            Select API Key
+          </button>
+        </div>
+      </div>
     );
   }
 
@@ -493,7 +547,7 @@ export default function App() {
       {/* Settings / Connect Modals */}
       {showConnectModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-950/40 backdrop-blur-md" onClick={() => setShowConnectModal(false)}>
-            <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-[3rem] p-8 shadow-2xl relative" onClick={e => e.stopPropagation()}>
+            <div className="w-full max-md bg-white dark:bg-slate-900 rounded-[3rem] p-8 shadow-2xl relative" onClick={e => e.stopPropagation()}>
                 <button onClick={() => setShowConnectModal(false)} className="absolute top-6 right-6 text-slate-400"><X /></button>
                 <h2 className="text-2xl font-black mb-6">লিঙ্ক করুন</h2>
                 <input autoFocus value={targetPeerId} onChange={e => setTargetPeerId(e.target.value)} type="text" placeholder="Nest ID লিখুন..." className="w-full bg-slate-50 dark:bg-slate-800 p-4 rounded-2xl outline-none border-2 border-transparent focus:border-orange-500 font-bold mb-4" />
@@ -508,7 +562,13 @@ export default function App() {
                 <button onClick={() => setShowSettings(false)} className="absolute top-8 right-8 text-slate-400"><X /></button>
                 <h2 className="text-3xl font-black mb-8">সেটিংস</h2>
                 <div className="flex flex-col items-center gap-8">
-                    <img src={myProfile?.avatar} className="w-32 h-32 rounded-[2.5rem] border-4 border-orange-500/20" />
+                    <div className="relative group">
+                        <img src={myProfile?.avatar} className="w-32 h-32 rounded-[2.5rem] border-4 border-orange-500/20 object-cover" />
+                        <label className="absolute inset-0 bg-black/40 rounded-[2.5rem] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
+                            <Camera className="text-white" />
+                            <input type="file" className="hidden" accept="image/*" onChange={handleAvatarChange} />
+                        </label>
+                    </div>
                     <div className="w-full space-y-4">
                         <div className="bg-slate-100 dark:bg-slate-800 p-4 rounded-2xl flex justify-between items-center">
                             <div><p className="text-[10px] font-black opacity-40 uppercase">My Nest ID</p><code className="font-bold text-orange-500">{myProfile?.id}</code></div>
@@ -527,8 +587,6 @@ export default function App() {
             </div>
         </div>
       )}
-
-      {/* Call Overlays remain same as previous version */}
     </div>
   );
 }

@@ -7,8 +7,8 @@ export const geminiService = {
       const apiKey = process.env.API_KEY;
       if (!apiKey) throw new Error("API Key is missing");
 
-      // Always create a new instance to ensure up-to-date API key
-      const ai = new GoogleGenAI({ apiKey });
+      // Always create a new instance to ensure up-to-date API key from the selection dialog
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const response = await ai.models.generateContent({
         model: 'gemini-3-pro-preview',
         contents: [
@@ -28,7 +28,7 @@ export const geminiService = {
       };
     } catch (error: any) {
       console.error("Gemini API Error:", error);
-      // Guidelines: If entity not found, key might be invalid/expired, prompt selection again
+      // If the request fails with "Requested entity was not found", the API key might be invalid or from an unpaid project
       if (error?.message?.includes("Requested entity was not found")) {
         window.aistudio?.openSelectKey();
       }
@@ -41,14 +41,14 @@ export const geminiService = {
       const apiKey = process.env.API_KEY;
       if (!apiKey) return null;
       
-      const ai = new GoogleGenAI({ apiKey });
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash-image',
         contents: { parts: [{ text: prompt }] }
       });
       if (response.candidates?.[0]?.content?.parts) {
         for (const part of response.candidates[0].content.parts) {
-          // Nano banana models return images in inlineData
+          // Nano banana models return images in inlineData parts
           if (part.inlineData) return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
         }
       }
@@ -66,7 +66,7 @@ export const geminiService = {
       const apiKey = process.env.API_KEY;
       if (!apiKey) return null;
 
-      const ai = new GoogleGenAI({ apiKey });
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       let operation = await ai.models.generateVideos({
         model: 'veo-3.1-fast-generate-preview',
         prompt,
@@ -77,15 +77,15 @@ export const geminiService = {
         }
       });
       
-      // Poll for video completion
+      // Poll for video completion as per Veo requirements
       while (!operation.done) {
         await new Promise(resolve => setTimeout(resolve, 10000));
         operation = await ai.operations.getVideosOperation({ operation: operation });
       }
       
       const downloadLink = operation.response?.generatedVideos?.[0]?.video?.uri;
-      // Guidelines: Must append API key when fetching from download link
-      return `${downloadLink}&key=${apiKey}`;
+      // Must append API key when fetching from the download link
+      return `${downloadLink}&key=${process.env.API_KEY}`;
     } catch (error: any) {
       console.error("Video Gen Error:", error);
       if (error?.message?.includes("Requested entity was not found")) {
