@@ -7,6 +7,7 @@ export const geminiService = {
       const apiKey = process.env.API_KEY;
       if (!apiKey) throw new Error("API Key is missing");
 
+      // Always create a new instance to ensure up-to-date API key
       const ai = new GoogleGenAI({ apiKey });
       const response = await ai.models.generateContent({
         model: 'gemini-3-pro-preview',
@@ -15,7 +16,7 @@ export const geminiService = {
             { role: 'user', parts: [{ text: prompt }] }
         ],
         config: {
-          systemInstruction: "You are Neo, a futuristic AI friend. You are witty and helpful. Provide grounding sources when using search.",
+          systemInstruction: "You are Neo, a futuristic AI friend living in ChatNest. You are witty, helpful, and love metaphors. Use search grounding for facts.",
           tools: [{ googleSearch: {} }]
         }
       });
@@ -25,9 +26,13 @@ export const geminiService = {
         text: response.text || "I'm processing but couldn't generate text.", 
         sources: groundingChunks?.map((c: any) => c.web).filter(Boolean) || []
       };
-    } catch (error) {
+    } catch (error: any) {
       console.error("Gemini API Error:", error);
-      return { text: "Connection to the neural network failed. Please check your API key.", sources: [] };
+      // Guidelines: If entity not found, key might be invalid/expired, prompt selection again
+      if (error?.message?.includes("Requested entity was not found")) {
+        window.aistudio?.openSelectKey();
+      }
+      return { text: "Connection to the neural network failed. Please verify your API key in Settings.", sources: [] };
     }
   },
 
@@ -43,11 +48,17 @@ export const geminiService = {
       });
       if (response.candidates?.[0]?.content?.parts) {
         for (const part of response.candidates[0].content.parts) {
+          // Nano banana models return images in inlineData
           if (part.inlineData) return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
         }
       }
       return null;
-    } catch (e) { return null; }
+    } catch (error: any) { 
+      if (error?.message?.includes("Requested entity was not found")) {
+        window.aistudio?.openSelectKey();
+      }
+      return null; 
+    }
   },
 
   async generateVideo(prompt: string) {
@@ -59,18 +70,27 @@ export const geminiService = {
       let operation = await ai.models.generateVideos({
         model: 'veo-3.1-fast-generate-preview',
         prompt,
-        config: { numberOfVideos: 1, resolution: '720p', aspectRatio: '16:9' }
+        config: { 
+          numberOfVideos: 1, 
+          resolution: '720p', 
+          aspectRatio: '16:9' 
+        }
       });
       
+      // Poll for video completion
       while (!operation.done) {
         await new Promise(resolve => setTimeout(resolve, 10000));
         operation = await ai.operations.getVideosOperation({ operation: operation });
       }
       
       const downloadLink = operation.response?.generatedVideos?.[0]?.video?.uri;
+      // Guidelines: Must append API key when fetching from download link
       return `${downloadLink}&key=${apiKey}`;
-    } catch (e) {
-      console.error("Video Gen Error:", e);
+    } catch (error: any) {
+      console.error("Video Gen Error:", error);
+      if (error?.message?.includes("Requested entity was not found")) {
+        window.aistudio?.openSelectKey();
+      }
       return null;
     }
   }
