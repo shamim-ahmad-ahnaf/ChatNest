@@ -17,6 +17,7 @@ export interface Message {
   timestamp: number;
   status: MessageStatus;
   isAI?: boolean;
+  isEdited?: boolean;
   media?: {
     type: 'image' | 'audio' | 'video' | 'file';
     url: string;
