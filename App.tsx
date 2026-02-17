@@ -10,10 +10,11 @@ import {
     Zap, Edit3, Settings2, Moon, Sun, ExternalLink,
     UserPlus2, Copy, Check, Headphones, Mic, Paperclip, 
     Video as VideoIcon, MicOff, CameraOff, Globe, Trash2,
-    Sparkles, User, ShieldCheck, Bell, MessageSquare
+    Sparkles, User, ShieldCheck, Bell, MessageSquare,
+    LayoutDashboard, Database, Activity, Terminal, ShieldAlert
 } from 'lucide-react';
 
-// Memoized Message Bubble for performance
+// Memoized Message Bubble
 const MessageBubble = memo(({ msg, isMe, onEdit, onDelete }: { 
   msg: Message, 
   isMe: boolean, 
@@ -58,47 +59,191 @@ const MessageBubble = memo(({ msg, isMe, onEdit, onDelete }: {
   );
 });
 
-const ChatInput = ({ onSend, onStartRecording, onStopRecording, isRecording, onFileSelect, editingMsg, cancelEdit }: any) => {
+// Added ChatInput component to fix compilation error and provide input controls
+const ChatInput = memo(({ 
+  onSend, 
+  onStartRecording, 
+  onStopRecording, 
+  isRecording, 
+  editingMsg, 
+  cancelEdit, 
+  onFileSelect 
+}: { 
+  onSend: (text: string) => void, 
+  onStartRecording: () => void, 
+  onStopRecording: () => void, 
+  isRecording: boolean, 
+  editingMsg: Message | null, 
+  cancelEdit: () => void, 
+  onFileSelect: (e: any) => void 
+}) => {
   const [text, setText] = useState('');
-  
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     if (editingMsg) setText(editingMsg.text);
     else setText('');
   }, [editingMsg]);
 
-  const handleSend = () => {
-    if (!text.trim()) return;
-    onSend(text);
-    setText('');
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (text.trim()) {
+      onSend(text);
+      setText('');
+    }
   };
 
   return (
-    <footer className="p-6 bg-slate-950/50 border-t border-slate-800/50 backdrop-blur-lg">
+    <div className="p-6 bg-slate-950/80 backdrop-blur-md border-t border-slate-800/50">
       {editingMsg && (
-        <div className="max-w-4xl mx-auto mb-3 flex items-center justify-between bg-orange-500/10 p-4 rounded-2xl border border-orange-500/20 animate-in slide-in-from-bottom-4">
-          <p className="text-xs font-black text-orange-500 flex items-center gap-2"><Edit3 className="w-4 h-4" /> এডিট মুড সক্রিয়</p>
-          <button onClick={cancelEdit} className="text-orange-500 hover:bg-orange-500/10 p-1 rounded-lg"><X className="w-4 h-4" /></button>
+        <div className="mb-4 flex items-center justify-between bg-orange-500/10 p-3 rounded-2xl border border-orange-500/20">
+          <div className="flex items-center gap-3">
+            <Edit3 className="w-4 h-4 text-orange-500" />
+            <p className="text-xs font-bold text-orange-500 uppercase tracking-widest">Editing Message</p>
+          </div>
+          <button onClick={cancelEdit} className="p-1 text-orange-500 hover:bg-orange-500/20 rounded-lg"><X className="w-4 h-4" /></button>
         </div>
       )}
-      <div className="max-w-4xl mx-auto flex items-end gap-3 p-2 bg-slate-900 rounded-[2.5rem] border border-slate-800 shadow-inner relative focus-within:ring-2 ring-orange-500/20 transition-all">
-        <label className="p-3.5 text-slate-400 hover:text-orange-500 cursor-pointer transition-colors">
-          <Paperclip className="w-6 h-6" />
-          <input type="file" className="hidden" onChange={onFileSelect} />
-        </label>
-        <textarea 
-          rows={1} 
-          value={text} 
-          onChange={(e) => setText(e.target.value)} 
-          onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleSend())} 
-          placeholder="এখানে লিখুন..." 
-          className="flex-1 bg-transparent py-4 outline-none text-[15px] font-medium resize-none min-h-[56px] text-slate-200" 
-        />
-        <button onMouseDown={onStartRecording} onMouseUp={onStopRecording} className={`p-3.5 rounded-full transition-all ${isRecording ? 'bg-orange-500 text-white scale-125 shadow-lg shadow-orange-500/30' : 'text-slate-400 hover:text-orange-500'}`}>
-          <Mic className="w-6 h-6" />
+      <form onSubmit={handleSubmit} className="flex items-end gap-4 max-w-6xl mx-auto">
+        <div className="flex-1 relative flex items-center gap-2 bg-slate-900 border border-slate-800 p-2 rounded-[2.5rem] focus-within:ring-2 ring-orange-500/20 transition-all">
+          <button type="button" onClick={() => fileInputRef.current?.click()} className="p-3.5 text-slate-400 hover:text-orange-500 hover:bg-orange-500/10 rounded-full transition-all">
+            <Paperclip className="w-5 h-5" />
+            <input type="file" ref={fileInputRef} onChange={onFileSelect} className="hidden" />
+          </button>
+          
+          <textarea 
+            value={text} 
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit(e); } }}
+            placeholder="মেসেজ লিখুন..." 
+            className="flex-1 bg-transparent py-3.5 px-2 outline-none text-sm font-medium resize-none max-h-32 custom-scrollbar"
+            rows={1}
+          />
+          
+          <button 
+            type="button" 
+            onMouseDown={onStartRecording} 
+            onMouseUp={onStopRecording}
+            onMouseLeave={isRecording ? onStopRecording : undefined}
+            className={`p-3.5 rounded-full transition-all ${isRecording ? 'bg-rose-500 text-white animate-pulse' : 'text-slate-400 hover:text-orange-500 hover:bg-orange-500/10'}`}
+          >
+            {isRecording ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+          </button>
+        </div>
+        
+        <button 
+          type="submit" 
+          disabled={!text.trim()} 
+          className="p-5 bg-orange-500 text-white rounded-[2rem] shadow-xl shadow-orange-500/20 hover:scale-105 disabled:opacity-50 disabled:scale-100 transition-all"
+        >
+          <Send className="w-6 h-6" />
         </button>
-        <button onClick={handleSend} className="p-4 bg-orange-500 text-white rounded-full shadow-xl shadow-orange-500/30 hover:scale-110 active:scale-95 transition-all"><Send className="w-6 h-6" /></button>
+      </form>
+    </div>
+  );
+});
+
+// Admin Panel Component
+const AdminPanel = ({ chats, onClose, onDeleteChat, messagesCount }: any) => {
+  const stats = [
+    { label: 'Total Contacts', value: chats.length, icon: User, color: 'text-orange-500' },
+    { label: 'Total Messages', value: messagesCount, icon: MessageSquare, color: 'text-purple-500' },
+    { label: 'Active Link', value: 'PeerJS P2P', icon: Activity, color: 'text-emerald-500' },
+    { label: 'Security', value: 'Encrypted', icon: ShieldCheck, color: 'text-blue-500' },
+  ];
+
+  return (
+    <div className="fixed inset-0 z-[150] bg-slate-950 flex flex-col animate-in fade-in duration-300">
+      <header className="p-6 border-b border-slate-800 flex items-center justify-between bg-slate-900/50">
+        <div className="flex items-center gap-4">
+          <div className="p-3 bg-orange-500 rounded-2xl shadow-lg shadow-orange-500/20 text-white">
+            <LayoutDashboard className="w-6 h-6" />
+          </div>
+          <div>
+            <h2 className="text-xl font-black">Admin Command Center</h2>
+            <p className="text-[10px] text-orange-500 font-bold uppercase tracking-[0.2em]">Full System Access • Root</p>
+          </div>
+        </div>
+        <button onClick={onClose} className="p-3 bg-slate-800 hover:bg-slate-700 rounded-xl transition-all"><X /></button>
+      </header>
+
+      <div className="flex-1 overflow-y-auto p-8 custom-scrollbar">
+        <div className="max-w-6xl mx-auto space-y-10">
+          {/* Stats Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+            {stats.map((s, idx) => (
+              <div key={idx} className="bg-slate-900 p-6 rounded-[2rem] border border-slate-800 shadow-xl">
+                <s.icon className={`w-6 h-6 ${s.color} mb-4`} />
+                <p className="text-xs font-bold text-slate-500 uppercase mb-1">{s.label}</p>
+                <p className="text-3xl font-black">{s.value}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* User Management Table */}
+          <div className="bg-slate-900 rounded-[2.5rem] border border-slate-800 overflow-hidden shadow-2xl">
+            <div className="p-6 border-b border-slate-800 flex items-center justify-between bg-slate-900/50">
+              <h3 className="font-black flex items-center gap-2"><Database className="w-5 h-5 text-orange-500" /> কন্টাক্ট ডাটাবেজ</h3>
+              <span className="text-xs text-slate-500 font-bold">{chats.length} কন্টাক্ট পাওয়া গেছে</span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left">
+                <thead>
+                  <tr className="text-[10px] font-black text-slate-500 uppercase tracking-widest border-b border-slate-800">
+                    <th className="px-6 py-4">User</th>
+                    <th className="px-6 py-4">Nest ID</th>
+                    <th className="px-6 py-4">Status</th>
+                    <th className="px-6 py-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800">
+                  {chats.map((chat: ChatSession) => (
+                    <tr key={chat.id} className="hover:bg-white/5 transition-all">
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-3">
+                          <img src={chat.avatar} className="w-10 h-10 rounded-xl object-cover" />
+                          <span className="font-bold text-sm">{chat.name}</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4"><code className="text-xs text-orange-400 bg-orange-500/10 px-2 py-1 rounded-lg">{chat.id}</code></td>
+                      <td className="px-6 py-4">
+                        <span className={`text-[10px] font-black uppercase px-2 py-1 rounded-md ${chat.isOnline ? 'text-emerald-500 bg-emerald-500/10' : 'text-slate-500 bg-slate-500/10'}`}>
+                          {chat.isOnline ? 'Online' : 'Offline'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-xs font-medium text-slate-400">{chat.lastMessage || 'No data'}</td>
+                      <td className="px-6 py-4 text-right">
+                        <button onClick={(e) => onDeleteChat(e, chat.id)} className="p-2 text-rose-500 hover:bg-rose-500/10 rounded-lg transition-all"><Trash2 className="w-4 h-4" /></button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Advanced Actions */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="bg-rose-500/5 p-8 rounded-[2.5rem] border border-rose-500/20">
+              <h4 className="font-black text-rose-500 mb-2 flex items-center gap-2"><ShieldAlert className="w-5 h-5" /> Danger Zone</h4>
+              <p className="text-sm text-slate-400 mb-6 font-medium">এই সেকশনের কাজগুলো পুনরায় ফেরত আনা সম্ভব নয়। অত্যন্ত সাবধানে ব্যবহার করুন।</p>
+              <div className="flex flex-wrap gap-4">
+                <button onClick={() => { if(window.confirm("সব ডেটা মুছে যাবে?")) { localStorage.clear(); window.location.reload(); } }} className="px-6 py-3 bg-rose-500 text-white rounded-2xl font-black text-xs shadow-lg shadow-rose-500/20">Wipe All Local Data</button>
+                <button onClick={() => { if(window.confirm("সব মেসেজ মুছে যাবে?")) { localStorage.removeItem('chatnest_messages_v1'); window.location.reload(); } }} className="px-6 py-3 bg-slate-800 text-rose-500 rounded-2xl font-black text-xs border border-rose-500/20">Clear Global Messages</button>
+              </div>
+            </div>
+            <div className="bg-orange-500/5 p-8 rounded-[2.5rem] border border-orange-500/20">
+              <h4 className="font-black text-orange-500 mb-2 flex items-center gap-2"><Terminal className="w-5 h-5" /> Debug Tools</h4>
+              <p className="text-sm text-slate-400 mb-6 font-medium">সিস্টেমের মেমোরি এবং কানেকশন স্ট্যাটাস পর্যবেক্ষণ করুন।</p>
+              <div className="flex flex-wrap gap-4">
+                <button onClick={() => console.log(localStorage)} className="px-6 py-3 bg-slate-800 text-orange-500 rounded-2xl font-black text-xs border border-orange-500/20">Log LocalStorage</button>
+                <button onClick={() => window.location.reload()} className="px-6 py-3 bg-orange-500 text-white rounded-2xl font-black text-xs shadow-lg shadow-orange-500/20">Restart Engine</button>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
-    </footer>
+    </div>
   );
 };
 
@@ -109,17 +254,13 @@ export default function App() {
     return saved ? JSON.parse(saved) : null;
   });
   
-  // Default to Dark Mode
-  const [isDarkMode, setIsDarkMode] = useState(() => {
-    const saved = localStorage.getItem('chatnest_dark');
-    return saved !== null ? saved === 'true' : true;
-  });
-  
+  const [isDarkMode] = useState(true); // Forced Dark Mode as per user request
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [chats, setChats] = useState<ChatSession[]>(dbService.getChats());
   const [messages, setMessages] = useState<Message[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [showSettings, setShowSettings] = useState(false);
+  const [showAdmin, setShowAdmin] = useState(false);
   const [showConnectModal, setShowConnectModal] = useState(false);
   const [targetPeerId, setTargetPeerId] = useState('');
   const [copyStatus, setCopyStatus] = useState(false);
@@ -147,105 +288,49 @@ export default function App() {
       if (window.aistudio) setHasApiKey(await window.aistudio.hasSelectedApiKey());
     };
     checkApiKey();
+    // Default to dark mode
+    document.documentElement.classList.add('dark');
   }, []);
 
-  // Peer Connection & Signaling Logic
+  // Peer Connection Logic
   useEffect(() => {
     if (isRegistered && myProfile) {
       const peer = new Peer(myProfile.id);
       peerRef.current = peer;
+      peer.on('connection', (conn) => {
+        if (conn.peer === 'ai-gemini') { conn.close(); return; }
+        conn.on('open', () => {
+          connectionsRef.current[conn.peer] = conn;
+          if (myProfile) conn.send({ type: 'profile_sync', profile: myProfile });
+        });
+        conn.on('data', (data: any) => {
+          if (data.type === 'message') {
+            const correctedMsg = { ...data.message, chatId: conn.peer };
+            dbService.saveMessage(correctedMsg);
+            setChats(dbService.getChats());
+            if (activeChatId === conn.peer) setMessages(prev => [...prev, correctedMsg]);
+          } else if (data.type === 'profile_sync') {
+            setChats(prev => {
+              const existing = prev.find(c => c.id === data.profile.id);
+              const updated = existing 
+                ? prev.map(c => c.id === data.profile.id ? { ...c, name: data.profile.name, avatar: data.profile.avatar, bio: data.profile.bio } : c)
+                : [{ ...data.profile, isOnline: true, type: 'contact', unreadCount: 0, lastMessage: 'Link established' }, ...prev];
+              dbService.saveChats(updated);
+              return updated;
+            });
+          }
+        });
+        conn.on('close', () => delete connectionsRef.current[conn.peer]);
+      });
 
-      peer.on('open', (id) => console.log('Peer connected with ID:', id));
-      peer.on('connection', (conn) => setupConnectionListeners(conn));
       peer.on('call', (call) => {
         if (call.peer === 'ai-gemini') { call.close(); return; }
         setIncomingCall({ peerId: call.peer, type: call.metadata?.type || 'audio', call });
       });
       
-      peer.on('error', (err) => {
-        console.error('Peer error:', err);
-        if (err.type === 'peer-unavailable' && !err.message.includes('ai-gemini')) {
-            alert('এই ID টি খুঁজে পাওয়া যায়নি বা অফলাইনে আছে।');
-        }
-      });
-
       return () => peer.destroy();
     }
   }, [isRegistered, myProfile?.id]);
-
-  const setupConnectionListeners = (conn: DataConnection) => {
-    if (conn.peer === 'ai-gemini') { conn.close(); return; }
-    conn.on('open', () => {
-      connectionsRef.current[conn.peer] = conn;
-      if (myProfile) conn.send({ type: 'profile_sync', profile: myProfile });
-    });
-    conn.on('data', (data: any) => handlePeerData(data, conn.peer));
-    conn.on('close', () => delete connectionsRef.current[conn.peer]);
-  };
-
-  const handlePeerData = (data: any, senderPeerId: string) => {
-    if (data.type === 'message') handleReceivedMessage(data.message, senderPeerId);
-    else if (data.type === 'profile_sync') updateChatWithProfile(data.profile);
-    else if (data.type === 'message_edit') handleSyncEdit(data.msgId, data.text);
-    else if (data.type === 'message_delete') handleSyncDelete(data.msgId);
-  };
-
-  const updateChatWithProfile = (profile: UserProfile) => {
-    setChats(prev => {
-      const existing = prev.find(c => c.id === profile.id);
-      let updated;
-      if (existing) {
-        updated = prev.map(c => c.id === profile.id ? { ...c, name: profile.name, avatar: profile.avatar, bio: profile.bio } : c);
-      } else {
-        updated = [{ id: profile.id, name: profile.name, avatar: profile.avatar, phone: profile.phone, isOnline: true, type: 'contact', unreadCount: 0, lastMessage: 'Link established', bio: profile.bio }, ...prev];
-      }
-      dbService.saveChats(updated);
-      return updated;
-    });
-  };
-
-  const handleReceivedMessage = (msg: Message, senderPeerId: string) => {
-    const correctedMsg = { ...msg, chatId: senderPeerId };
-    dbService.saveMessage(correctedMsg);
-    setChats(dbService.getChats());
-    if (activeChatId === senderPeerId) setMessages(prev => [...prev, correctedMsg]);
-  };
-
-  const handleSyncEdit = (msgId: string, text: string) => {
-    setMessages(prev => prev.map(m => m.id === msgId ? { ...m, text, isEdited: true } : m));
-    setChats(dbService.getChats());
-  };
-
-  const handleSyncDelete = (msgId: string) => {
-    setMessages(prev => prev.filter(m => m.id !== msgId));
-    dbService.deleteMessage(msgId);
-    setChats(dbService.getChats());
-  };
-
-  const connectToPeer = (id: string) => {
-    const targetId = id.trim();
-    if (targetId === 'ai-gemini') { setActiveChatId('ai-gemini'); setShowConnectModal(false); setTargetPeerId(''); return; }
-    if (!peerRef.current || !targetId || targetId === myProfile?.id) return;
-    const conn = peerRef.current.connect(targetId);
-    setupConnectionListeners(conn);
-    setActiveChatId(targetId);
-    setShowConnectModal(false);
-    setTargetPeerId('');
-  };
-
-  const deleteChat = (e: React.MouseEvent, chatId: string) => {
-    e.stopPropagation();
-    if (!window.confirm("আপনি কি এই চ্যাট এবং সমস্ত মেসেজ মুছে ফেলতে চান?")) return;
-    dbService.deleteChat(chatId);
-    setChats(dbService.getChats());
-    if (activeChatId === chatId) setActiveChatId(null);
-  };
-
-  useEffect(() => {
-    if (isDarkMode) document.documentElement.classList.add('dark');
-    else document.documentElement.classList.remove('dark');
-    localStorage.setItem('chatnest_dark', isDarkMode.toString());
-  }, [isDarkMode]);
 
   useEffect(() => {
     if (activeChatId) setMessages(dbService.getMessages(activeChatId));
@@ -255,78 +340,82 @@ export default function App() {
     scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isGenerating]);
 
-  useEffect(() => {
-    if (activeCall?.remoteStream && remoteVideoRef.current) remoteVideoRef.current.srcObject = activeCall.remoteStream;
-    if (activeCall?.stream && localVideoRef.current) localVideoRef.current.srcObject = activeCall.stream;
-  }, [activeCall]);
+  // Handle start of voice recording
+  const startRecording = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) audioChunksRef.current.push(event.data);
+      };
+
+      mediaRecorder.onstop = () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          handleSendMessage('', { 
+            type: 'audio', 
+            url: reader.result as string, 
+            mimeType: 'audio/webm',
+            fileName: 'voice-note.webm'
+          });
+        };
+        reader.readAsDataURL(audioBlob);
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+    } catch (err) {
+      console.error("Microphone access denied:", err);
+    }
+  }, []);
+
+  // Handle end of voice recording
+  const stopRecording = useCallback(() => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+    }
+  }, [isRecording]);
 
   const handleSendMessage = async (text: string, media?: Message['media']) => {
     if (!activeChatId || !myProfile) return;
+
     if (editingMsg) {
-      const updatedMessages = messages.map(m => m.id === editingMsg.id ? { ...m, text, isEdited: true } : m);
-      setMessages(updatedMessages);
-      dbService.saveMessage(updatedMessages.find(m => m.id === editingMsg.id)!);
-      if (!isAIChat) {
-        const conn = connectionsRef.current[activeChatId];
-        if (conn?.open) conn.send({ type: 'message_edit', msgId: editingMsg.id, text });
-      }
+      const updatedMsg = { ...editingMsg, text, isEdited: true, timestamp: Date.now() };
+      dbService.saveMessage(updatedMsg);
+      setMessages(prev => prev.map(m => m.id === editingMsg.id ? updatedMsg : m));
       setEditingMsg(null);
-      setChats(dbService.getChats());
       return;
     }
+
     const newMessage: Message = { id: `msg-${Date.now()}`, chatId: activeChatId, senderId: myProfile.id, senderName: myProfile.name, senderAvatar: myProfile.avatar, text, timestamp: Date.now(), status: MessageStatus.SENT, media };
     setMessages(prev => [...prev, newMessage]);
     dbService.saveMessage(newMessage);
-    if (isAIChat) handleAIResponse(text);
-    else {
+    if (isAIChat) {
+      setIsGenerating(true);
+      const resp = await geminiService.getChatResponse(text, messages.slice(-5).map(m => ({ role: m.senderId === 'ai-gemini' ? 'model' : 'user', text: m.text })));
+      const aiMsg: Message = { id: `ai-${Date.now()}`, chatId: 'ai-gemini', senderId: 'ai-gemini', senderName: 'Neo AI', text: resp.text, timestamp: Date.now(), status: MessageStatus.DELIVERED, isAI: true, sources: resp.sources };
+      dbService.saveMessage(aiMsg);
+      setMessages(prev => [...prev, aiMsg]);
+      setIsGenerating(false);
+    } else {
       const conn = connectionsRef.current[activeChatId];
       if (conn?.open) conn.send({ type: 'message', message: newMessage });
-      else {
-        const newConn = peerRef.current!.connect(activeChatId);
-        setupConnectionListeners(newConn);
-        newConn.on('open', () => newConn.send({ type: 'message', message: newMessage }));
-      }
     }
     setChats(dbService.getChats());
   };
 
-  const handleAIResponse = async (text: string) => {
-    setIsGenerating(true);
-    if (text.startsWith('/image ')) {
-      const imageUrl = await geminiService.generateImage(text.replace('/image ', ''));
-      if (imageUrl) saveAI({ id: `ai-${Date.now()}`, chatId: 'ai-gemini', senderId: 'ai-gemini', senderName: 'Neo AI', text: `Result: ${text.replace('/image ', '')}`, timestamp: Date.now(), status: MessageStatus.DELIVERED, media: { type: 'image', url: imageUrl, mimeType: 'image/png' }, isAI: true });
-      setIsGenerating(false); return;
-    }
-    const resp = await geminiService.getChatResponse(text, messages.slice(-5).map(m => ({ role: m.senderId === 'ai-gemini' ? 'model' : 'user', text: m.text })));
-    saveAI({ id: `ai-${Date.now()}`, chatId: 'ai-gemini', senderId: 'ai-gemini', senderName: 'Neo AI', text: resp.text, timestamp: Date.now(), status: MessageStatus.DELIVERED, isAI: true, sources: resp.sources });
-    setIsGenerating(false);
-  };
-
-  const saveAI = (msg: Message) => {
-    dbService.saveMessage(msg);
-    setMessages(prev => [...prev, msg]);
+  const deleteChat = (e: React.MouseEvent, chatId: string) => {
+    e.stopPropagation();
+    if (!window.confirm("আপনি কি এই চ্যাট মুছে ফেলতে চান?")) return;
+    dbService.deleteChat(chatId);
     setChats(dbService.getChats());
-  };
-
-  const handleRegister = (e: React.FormEvent) => {
-    e.preventDefault();
-    const fd = new FormData(e.currentTarget as HTMLFormElement);
-    const profile: UserProfile = { id: `nest-${Math.random().toString(36).substr(2, 6)}`, name: fd.get('name') as string, phone: fd.get('phone') as string, avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${fd.get('name')}`, bio: 'চ্যাটনেস্টে স্বাগতম!', status: 'online' };
-    setMyProfile(profile);
-    localStorage.setItem('chatnest_profile', JSON.stringify(profile));
-    setIsRegistered(true);
-  };
-
-  const updateProfile = (updates: Partial<UserProfile>) => {
-    if (!myProfile) return;
-    const updated = { ...myProfile, ...updates };
-    setMyProfile(updated);
-    localStorage.setItem('chatnest_profile', JSON.stringify(updated));
-    if (peerRef.current?.open) {
-      (Object.values(connectionsRef.current) as DataConnection[]).forEach(conn => {
-        if (conn.open) conn.send({ type: 'profile_sync', profile: updated });
-      });
-    }
+    if (activeChatId === chatId) setActiveChatId(null);
   };
 
   const startCall = async (type: 'audio' | 'video') => {
@@ -336,47 +425,26 @@ export default function App() {
       const call = peerRef.current.call(activeChatId, stream, { metadata: { type } });
       setActiveCall({ stream, remoteStream: null, type, call });
       call.on('stream', (remoteStream) => setActiveCall(prev => prev ? { ...prev, remoteStream } : null));
-      call.on('close', endCall);
+      call.on('close', () => setActiveCall(null));
     } catch (err) { alert("Access denied."); }
   };
 
-  const endCall = () => {
-    if (activeCall) { activeCall.stream.getTracks().forEach(t => t.stop()); activeCall.call.close(); setActiveCall(null); }
-    setIncomingCall(null);
-  };
-
-  const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mr = new MediaRecorder(stream);
-      mediaRecorderRef.current = mr; audioChunksRef.current = [];
-      mr.ondataavailable = (e) => audioChunksRef.current.push(e.data);
-      mr.onstop = () => {
-        const reader = new FileReader();
-        reader.onloadend = () => handleSendMessage('', { type: 'audio', url: reader.result as string, mimeType: 'audio/webm', fileName: 'Voice' });
-        reader.readAsDataURL(new Blob(audioChunksRef.current, { type: 'audio/webm' }));
-        stream.getTracks().forEach(t => t.stop());
-      };
-      mr.start(); setIsRecording(true);
-    } catch (e) { alert("Mic required"); }
-  };
-
   if (!isRegistered) return (
-    <div className="h-screen bg-slate-950 flex items-center justify-center p-6">
+    <div className="h-screen bg-slate-950 flex items-center justify-center p-6 text-white">
       <div className="w-full max-w-md bg-slate-900 rounded-[3rem] p-10 shadow-2xl border border-orange-500/10">
-        <div className="w-20 h-20 bg-orange-500 rounded-3xl flex items-center justify-center mx-auto mb-8 shadow-lg shadow-orange-500/20"><Zap className="w-10 h-10 text-white" /></div>
-        <h1 className="text-3xl font-black text-center mb-6 text-white">ChatNest</h1>
+        <Zap className="w-16 h-16 text-orange-500 mx-auto mb-8" />
+        <h1 className="text-3xl font-black text-center mb-10">ChatNest Registration</h1>
         <form onSubmit={handleRegister} className="space-y-6">
-          <input name="name" type="text" placeholder="আপনার নাম" className="w-full bg-slate-800 p-4 rounded-2xl outline-none border-2 border-transparent focus:border-orange-500 font-bold transition-all text-white" required />
-          <input name="phone" type="tel" placeholder="ফোন নম্বর" className="w-full bg-slate-800 p-4 rounded-2xl outline-none border-2 border-transparent focus:border-orange-500 font-bold transition-all text-white" required />
-          <button type="submit" className="w-full py-5 bg-orange-500 text-white rounded-2xl font-black text-lg shadow-xl shadow-orange-500/30">শুরু করুন</button>
+          <input name="name" type="text" placeholder="আপনার নাম" className="w-full bg-slate-800 p-5 rounded-2xl outline-none border-2 border-transparent focus:border-orange-500 font-bold transition-all" required />
+          <input name="phone" type="tel" placeholder="ফোন নম্বর" className="w-full bg-slate-800 p-5 rounded-2xl outline-none border-2 border-transparent focus:border-orange-500 font-bold transition-all" required />
+          <button type="submit" className="w-full py-5 bg-orange-500 text-white rounded-2xl font-black text-lg shadow-xl">শুরু করুন</button>
         </form>
       </div>
     </div>
   );
 
   return (
-    <div className={`flex h-screen bg-slate-950 text-slate-100 font-jakarta selection:bg-orange-500/30`}>
+    <div className="flex h-screen bg-slate-950 text-slate-100 font-jakarta selection:bg-orange-500/30">
       {/* Sidebar */}
       <aside className={`${activeChatId ? 'hidden md:flex' : 'flex'} w-full md:w-80 lg:w-96 flex-col border-r border-slate-800/50 bg-slate-900/50 backdrop-blur-sm`}>
         <div className="p-6 flex flex-col h-full">
@@ -389,7 +457,7 @@ export default function App() {
           </div>
           <div className="relative mb-6">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input type="text" placeholder="সার্চ করুন..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-slate-800 rounded-2xl py-3.5 pl-12 pr-4 text-sm outline-none shadow-sm border border-slate-700/50 focus:ring-2 ring-orange-500/20" />
+            <input type="text" placeholder="সার্চ করুন..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-slate-800 rounded-2xl py-3.5 pl-12 pr-4 text-sm outline-none border border-slate-700/50 focus:ring-2 ring-orange-500/20" />
           </div>
           <div className="space-y-2 overflow-y-auto flex-1 pr-2 custom-scrollbar">
             {chats.filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase())).map(chat => (
@@ -435,12 +503,32 @@ export default function App() {
             </header>
             <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
               {messages.map((msg) => (
-                <MessageBubble key={msg.id} msg={msg} isMe={msg.senderId === myProfile?.id} onEdit={setEditingMsg} onDelete={(id) => { if(window.confirm("মুছে ফেলতে চান?")) { setMessages(prev => prev.filter(m => m.id !== id)); dbService.deleteMessage(id); } }} />
+                <MessageBubble key={msg.id} msg={msg} isMe={msg.senderId === myProfile?.id} onEdit={setEditingMsg} onDelete={(id) => { if(window.confirm("মুছে ফেলতে চান?")) { setMessages(prev => prev.filter(m => m.id !== id)); dbService.deleteMessage(id); setChats(dbService.getChats()); } }} />
               ))}
               {isGenerating && <div className="flex gap-2 items-center text-[11px] font-black text-orange-500 animate-pulse ml-4">Neo is thinking...</div>}
               <div ref={scrollRef} />
             </div>
-            <ChatInput onSend={handleSendMessage} onStartRecording={startRecording} onStopRecording={() => { if(mediaRecorderRef.current) { mediaRecorderRef.current.stop(); setIsRecording(false); } }} isRecording={isRecording} editingMsg={editingMsg} cancelEdit={() => setEditingMsg(null)} onFileSelect={(e:any) => { const file = e.target.files?.[0]; if(file) { const reader = new FileReader(); reader.onloadend = () => handleSendMessage('', { type: file.type.startsWith('image/') ? 'image' : 'file', url: reader.result as string, mimeType: file.type, fileName: file.name }); reader.readAsDataURL(file); } }} />
+            <ChatInput 
+              onSend={handleSendMessage} 
+              onStartRecording={startRecording} 
+              onStopRecording={stopRecording} 
+              isRecording={isRecording} 
+              editingMsg={editingMsg} 
+              cancelEdit={() => setEditingMsg(null)} 
+              onFileSelect={(e:any) => { 
+                const file = e.target.files?.[0]; 
+                if(file) { 
+                  const reader = new FileReader(); 
+                  reader.onloadend = () => handleSendMessage('', { 
+                    type: file.type.startsWith('image/') ? 'image' : 'file', 
+                    url: reader.result as string, 
+                    mimeType: file.type, 
+                    fileName: file.name 
+                  }); 
+                  reader.readAsDataURL(file); 
+                } 
+              }} 
+            />
           </>
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-center p-10 bg-slate-950 relative overflow-hidden">
@@ -470,7 +558,7 @@ export default function App() {
                   <h3 className="text-sm font-black text-orange-500 uppercase tracking-widest mb-2">Display Name</h3>
                   <div className="flex items-center gap-3 bg-slate-800/50 p-4 rounded-2xl border border-slate-700">
                     <User className="w-5 h-5 text-slate-400" />
-                    <input type="text" value={myProfile?.name} onChange={(e) => updateProfile({ name: e.target.value })} className="bg-transparent outline-none w-full font-bold" />
+                    <input type="text" value={myProfile?.name} onChange={(e) => updateProfile({ name: e.target.value })} className="bg-transparent outline-none w-full font-bold text-white" />
                   </div>
                 </div>
 
@@ -478,7 +566,7 @@ export default function App() {
                   <h3 className="text-sm font-black text-orange-500 uppercase tracking-widest mb-2">Your Bio</h3>
                   <div className="flex items-start gap-3 bg-slate-800/50 p-4 rounded-2xl border border-slate-700">
                     <MessageSquare className="w-5 h-5 text-slate-400 mt-1" />
-                    <textarea value={myProfile?.bio} onChange={(e) => updateProfile({ bio: e.target.value })} className="bg-transparent outline-none w-full font-medium h-20 resize-none" placeholder="নিজের সম্পর্কে কিছু লিখুন..." />
+                    <textarea value={myProfile?.bio} onChange={(e) => updateProfile({ bio: e.target.value })} className="bg-transparent outline-none w-full font-medium h-20 resize-none text-white" placeholder="নিজের সম্পর্কে কিছু লিখুন..." />
                   </div>
                 </div>
 
@@ -486,7 +574,7 @@ export default function App() {
                   <div className="bg-slate-800/50 p-4 rounded-2xl border border-slate-700">
                     <h4 className="text-[10px] font-black text-slate-400 uppercase mb-1">Nest ID</h4>
                     <div className="flex items-center justify-between">
-                      <code className="text-xs font-bold">{myProfile?.id}</code>
+                      <code className="text-xs font-bold text-orange-400">{myProfile?.id}</code>
                       <button onClick={() => { navigator.clipboard.writeText(myProfile!.id); setCopyStatus(true); setTimeout(()=>setCopyStatus(false),2000); }} className="text-orange-500">{copyStatus ? <Check className="w-4 h-4"/> : <Copy className="w-4 h-4"/>}</button>
                     </div>
                   </div>
@@ -499,19 +587,22 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between p-4 bg-slate-800/30 rounded-2xl border border-dashed border-slate-700">
-                   <div className="flex items-center gap-3">
-                     <Bell className="w-5 h-5 text-slate-400" />
-                     <span className="font-bold text-sm">Notifications</span>
-                   </div>
-                   <div className="w-12 h-6 bg-orange-500 rounded-full flex items-center justify-end p-1"><div className="w-4 h-4 bg-white rounded-full shadow-sm" /></div>
-                </div>
-
+                <button onClick={() => { setShowAdmin(true); setShowSettings(false); }} className="w-full py-4 bg-orange-500 text-white rounded-2xl font-black text-sm shadow-xl shadow-orange-500/20 flex items-center justify-center gap-3"><LayoutDashboard className="w-5 h-5" /> Open Admin Console</button>
                 <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="w-full py-4 bg-rose-500/10 text-rose-500 rounded-2xl font-black text-sm hover:bg-rose-500 hover:text-white transition-all">লগ আউট / রিসেট করুন</button>
               </div>
             </div>
           </div>
         </div>
+      )}
+
+      {/* Admin Panel Modal */}
+      {showAdmin && (
+        <AdminPanel 
+          chats={chats} 
+          onClose={() => setShowAdmin(false)} 
+          onDeleteChat={deleteChat}
+          messagesCount={JSON.parse(localStorage.getItem('chatnest_messages_v1') || '[]').length}
+        />
       )}
 
       {/* Connect Modal */}
@@ -525,49 +616,51 @@ export default function App() {
         </div>
       )}
 
-      {/* Call Screens (Hidden until active) */}
+      {/* Call Screens */}
       {incomingCall && (
         <div className="fixed inset-0 z-[200] bg-slate-950/95 flex flex-col items-center justify-center text-white backdrop-blur-2xl p-10 animate-in zoom-in-95">
           <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${incomingCall.peerId}`} className="w-36 h-36 rounded-[3rem] mb-10 border-4 border-orange-500/20" />
           <h2 className="text-4xl font-black mb-3">{incomingCall.peerId}</h2>
           <p className="text-emerald-500 animate-pulse font-bold uppercase tracking-widest">Incoming Call...</p>
           <div className="flex gap-12 mt-20">
-            <button onClick={endCall} className="w-24 h-24 bg-rose-500 rounded-full flex items-center justify-center shadow-xl"><PhoneOff className="w-10 h-10" /></button>
+            <button onClick={() => setIncomingCall(null)} className="w-24 h-24 bg-rose-500 rounded-full flex items-center justify-center shadow-xl"><PhoneOff className="w-10 h-10" /></button>
             <button onClick={async () => {
               try {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: incomingCall.type === 'video' });
                 incomingCall.call.answer(stream);
                 setActiveCall({ stream, remoteStream: null, type: incomingCall.type, call: incomingCall.call });
-                incomingCall.call.on('stream', (rs) => setActiveCall(p => p ? {...p, remoteStream: rs} : null));
                 setIncomingCall(null);
-              } catch(e) { alert("Mic/Camera error"); }
+              } catch(e) { alert("Mic error"); }
             }} className="w-24 h-24 bg-emerald-500 rounded-full flex items-center justify-center shadow-xl"><Phone className="w-10 h-10" /></button>
-          </div>
-        </div>
-      )}
-
-      {activeCall && (
-        <div className="fixed inset-0 z-[200] bg-slate-950 flex flex-col items-center justify-center">
-          {activeCall.type === 'video' ? (
-            <div className="w-full h-full relative">
-              <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover" />
-              <div className="absolute top-10 right-10 w-48 h-72 bg-slate-900 rounded-3xl border-4 border-white/20 overflow-hidden shadow-2xl">
-                <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
-              </div>
-            </div>
-          ) : (
-            <div className="flex flex-col items-center">
-              <div className="w-48 h-48 bg-orange-500/10 rounded-full flex items-center justify-center mb-12 animate-pulse">
-                <Headphones className="w-24 h-24 text-orange-500" />
-              </div>
-              <h2 className="text-4xl font-black text-white">ভয়েস কল চলছে</h2>
-            </div>
-          )}
-          <div className="absolute bottom-16">
-            <button onClick={endCall} className="w-20 h-20 bg-rose-500 text-white rounded-full flex items-center justify-center shadow-xl"><PhoneOff className="w-9 h-9" /></button>
           </div>
         </div>
       )}
     </div>
   );
+
+  function handleRegister(e: React.FormEvent) {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget as HTMLFormElement);
+    const profile: UserProfile = { id: `nest-${Math.random().toString(36).substr(2, 6)}`, name: fd.get('name') as string, phone: fd.get('phone') as string, avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${fd.get('name')}`, bio: 'চ্যাটনেস্টে স্বাগতম!', status: 'online' };
+    setMyProfile(profile);
+    localStorage.setItem('chatnest_profile', JSON.stringify(profile));
+    setIsRegistered(true);
+  }
+
+  function updateProfile(updates: Partial<UserProfile>) {
+    if (!myProfile) return;
+    const updated = { ...myProfile, ...updates };
+    setMyProfile(updated);
+    localStorage.setItem('chatnest_profile', JSON.stringify(updated));
+  }
+
+  function connectToPeer(id: string) {
+    const targetId = id.trim();
+    if (targetId === 'ai-gemini') { setActiveChatId('ai-gemini'); setShowConnectModal(false); setTargetPeerId(''); return; }
+    if (!peerRef.current || !targetId || targetId === myProfile?.id) return;
+    const conn = peerRef.current.connect(targetId);
+    setActiveChatId(targetId);
+    setShowConnectModal(false);
+    setTargetPeerId('');
+  }
 }
