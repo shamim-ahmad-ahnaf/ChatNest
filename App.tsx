@@ -168,6 +168,10 @@ export default function App() {
         setIncomingCall({ peerId: call.peer, type: call.metadata?.type || 'audio', call });
       });
 
+      peer.on('error', (err) => {
+        console.error("PeerJS Error:", err);
+      });
+
       return () => {
         peer.destroy();
       };
@@ -195,9 +199,16 @@ export default function App() {
   }, [activeCall]);
 
   const setupConnection = (conn: DataConnection) => {
+    // Prevent duplicate handlers if connection already set up
+    if (connectionsRef.current[conn.peer]?.open && connectionsRef.current[conn.peer] !== conn) {
+        conn.close();
+        return;
+    }
+
     conn.on('open', () => {
       connectionsRef.current[conn.peer] = conn;
       if (myProfile) conn.send({ type: 'profile_sync', profile: myProfile });
+      setChats(prev => prev.map(c => c.id === conn.peer ? { ...c, isOnline: true } : c));
     });
 
     conn.on('data', (data: any) => {
@@ -220,7 +231,14 @@ export default function App() {
     });
 
     conn.on('close', () => {
-      delete connectionsRef.current[conn.peer];
+      if (connectionsRef.current[conn.peer] === conn) {
+          delete connectionsRef.current[conn.peer];
+      }
+      setChats(prev => prev.map(c => c.id === conn.peer ? { ...c, isOnline: false } : c));
+    });
+
+    conn.on('error', (err) => {
+      console.error("Connection error with peer:", conn.peer, err);
     });
   };
 
@@ -258,7 +276,14 @@ export default function App() {
       return;
     }
 
-    const conn = peerRef.current.connect(tid);
+    // Use existing connection if it's already open
+    if (connectionsRef.current[tid]?.open) {
+        setActiveChatId(tid);
+        setShowConnectModal(false);
+        return;
+    }
+
+    const conn = peerRef.current.connect(tid, { reliable: true });
     setupConnection(conn);
     
     // Initial dummy profile until synced
@@ -271,6 +296,16 @@ export default function App() {
 
   const handleSendMessage = async (text: string, media?: any) => {
     if (!activeChatId || !myProfile) return;
+
+    // Check connection reliability for P2P
+    if (activeChatId !== 'ai-gemini') {
+        const conn = connectionsRef.current[activeChatId];
+        if (!conn || !conn.open) {
+            // Attempt auto-reconnect once
+            const newConn = peerRef.current?.connect(activeChatId, { reliable: true });
+            if (newConn) setupConnection(newConn);
+        }
+    }
 
     if (editingMsg) {
       const updatedMsg: Message = { 
@@ -328,6 +363,9 @@ export default function App() {
       const conn = connectionsRef.current[activeChatId];
       if (conn?.open) {
         conn.send({ type: 'message', message: newMessage });
+      } else {
+          // If connection failed even after reconnect attempt, mark status
+          setMessages(prev => prev.map(m => m.id === newMessage.id ? { ...m, status: MessageStatus.FAILED } : m));
       }
     }
     setChats(dbService.getChats());
@@ -409,7 +447,10 @@ export default function App() {
               >
                 <img src={chat.avatar} className="w-12 h-12 rounded-2xl object-cover" />
                 <div className="flex-1 truncate">
-                  <h3 className={`font-bold text-sm truncate ${activeChatId === chat.id ? 'text-white' : ''}`}>{chat.name}</h3>
+                  <div className="flex items-center gap-2">
+                      <h3 className={`font-bold text-sm truncate ${activeChatId === chat.id ? 'text-white' : ''}`}>{chat.name}</h3>
+                      {chat.isOnline && <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />}
+                  </div>
                   <p className={`text-xs truncate ${activeChatId === chat.id ? 'text-white/70' : 'opacity-50'}`}>{chat.lastMessage || 'Link established'}</p>
                 </div>
                 {chat.id !== 'ai-gemini' && (
@@ -445,7 +486,7 @@ export default function App() {
                 </div>
                 <div>
                   <h2 className="font-black text-white">{currentChat?.name}</h2>
-                  <p className="text-[10px] text-orange-500 font-black uppercase tracking-widest">{currentChat?.isOnline ? 'Online' : 'Connected'}</p>
+                  <p className="text-[10px] text-orange-500 font-black uppercase tracking-widest">{currentChat?.isOnline ? 'Online' : 'Offline / Waiting'}</p>
                 </div>
               </div>
               
