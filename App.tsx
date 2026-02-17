@@ -42,12 +42,14 @@ const MessageBubble = memo(({ msg, isMe, onEdit, onDelete }: {
         )}
 
         {isMe && (
-          <div className="absolute top-0 -left-14 opacity-0 group-hover:opacity-100 flex flex-col gap-1.5 transition-all">
+          <div className="absolute top-0 -left-20 opacity-0 group-hover:opacity-100 flex gap-1.5 transition-all">
+            <button onClick={() => onEdit(msg)} className="p-2.5 bg-slate-800 text-slate-400 rounded-xl shadow-lg border border-slate-700 hover:text-orange-500"><Edit3 className="w-3.5 h-3.5" /></button>
             <button onClick={() => onDelete(msg.id)} className="p-2.5 bg-slate-800 text-rose-500 rounded-xl shadow-lg border border-slate-700 hover:bg-rose-500/10"><Trash2 className="w-3.5 h-3.5" /></button>
           </div>
         )}
 
         <div className="flex justify-end items-center gap-1.5 mt-2.5 opacity-60 text-[10px] font-black tracking-tight">
+          {msg.isEdited && <span className="italic mr-1">(Edited)</span>}
           {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           {isMe && <CheckCheck className="w-3.5 h-3.5" />}
         </div>
@@ -56,9 +58,17 @@ const MessageBubble = memo(({ msg, isMe, onEdit, onDelete }: {
   );
 });
 
-const ChatInput = memo(({ onSend, isRecording, onStartRecording, onStopRecording, onFileSelect }: any) => {
+const ChatInput = memo(({ onSend, isRecording, onStartRecording, onStopRecording, onFileSelect, editingMsg, onCancelEdit }: any) => {
   const [text, setText] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editingMsg) {
+      setText(editingMsg.text);
+    } else {
+      setText('');
+    }
+  }, [editingMsg]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -70,6 +80,22 @@ const ChatInput = memo(({ onSend, isRecording, onStartRecording, onStopRecording
 
   return (
     <div className="p-6 bg-slate-950/80 backdrop-blur-md border-t border-slate-800/50">
+      <div className="max-w-6xl mx-auto mb-4">
+        {editingMsg && (
+          <div className="flex items-center justify-between bg-orange-500/10 border border-orange-500/20 p-3 rounded-2xl mb-2 animate-in slide-in-from-bottom-2">
+            <div className="flex items-center gap-3">
+              <Edit3 className="w-4 h-4 text-orange-500" />
+              <div>
+                <p className="text-[10px] font-black uppercase text-orange-500 tracking-widest">Editing Message</p>
+                <p className="text-xs text-slate-400 truncate max-w-md">{editingMsg.text}</p>
+              </div>
+            </div>
+            <button onClick={onCancelEdit} className="p-1.5 hover:bg-orange-500/20 rounded-full transition-all">
+              <X className="w-4 h-4 text-orange-500" />
+            </button>
+          </div>
+        )}
+      </div>
       <form onSubmit={handleSubmit} className="flex items-end gap-4 max-w-6xl mx-auto">
         <div className="flex-1 relative flex items-center gap-2 bg-slate-900 border border-slate-800 p-2 rounded-[2.5rem] focus-within:ring-2 ring-orange-500/20">
           <button type="button" onClick={() => fileInputRef.current?.click()} className="p-3.5 text-slate-400 hover:text-orange-500 hover:bg-orange-500/10 rounded-full"><Paperclip className="w-5 h-5" /></button>
@@ -78,7 +104,7 @@ const ChatInput = memo(({ onSend, isRecording, onStartRecording, onStopRecording
             value={text} 
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit(e); } }}
-            placeholder="এখানে মেসেজ লিখুন..." 
+            placeholder={editingMsg ? "মেসেজ আপডেট করুন..." : "এখানে মেসেজ লিখুন..."} 
             className="flex-1 bg-transparent py-3.5 px-2 outline-none text-sm font-medium resize-none max-h-32 custom-scrollbar"
             rows={1}
           />
@@ -91,7 +117,9 @@ const ChatInput = memo(({ onSend, isRecording, onStartRecording, onStopRecording
             <Mic className="w-5 h-5" />
           </button>
         </div>
-        <button type="submit" className="p-5 bg-orange-500 text-white rounded-[2rem] shadow-xl hover:scale-105 transition-all active:scale-95"><Send className="w-6 h-6" /></button>
+        <button type="submit" className="p-5 bg-orange-500 text-white rounded-[2rem] shadow-xl hover:scale-105 transition-all active:scale-95">
+          {editingMsg ? <Check className="w-6 h-6" /> : <Send className="w-6 h-6" />}
+        </button>
       </form>
     </div>
   );
@@ -114,6 +142,7 @@ export default function App() {
   const [targetPeerId, setTargetPeerId] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
+  const [editingMsg, setEditingMsg] = useState<Message | null>(null);
   const [incomingCall, setIncomingCall] = useState<any>(null);
   const [activeCall, setActiveCall] = useState<any>(null);
   const [copyStatus, setCopyStatus] = useState(false);
@@ -179,6 +208,12 @@ export default function App() {
         if (activeChatId === conn.peer) {
           setMessages(prev => [...prev, incomingMsg]);
         }
+      } else if (data.type === 'message_update') {
+        const updatedMsg = { ...data.message, chatId: conn.peer };
+        dbService.saveMessage(updatedMsg);
+        if (activeChatId === conn.peer) {
+          setMessages(prev => prev.map(m => m.id === updatedMsg.id ? updatedMsg : m));
+        }
       } else if (data.type === 'profile_sync') {
         syncChatProfile(data.profile);
       }
@@ -236,6 +271,26 @@ export default function App() {
 
   const handleSendMessage = async (text: string, media?: any) => {
     if (!activeChatId || !myProfile) return;
+
+    if (editingMsg) {
+      const updatedMsg: Message = { 
+        ...editingMsg, 
+        text, 
+        isEdited: true,
+        timestamp: Date.now() 
+      };
+      
+      setMessages(prev => prev.map(m => m.id === editingMsg.id ? updatedMsg : m));
+      dbService.saveMessage(updatedMsg);
+      
+      const conn = connectionsRef.current[activeChatId];
+      if (conn?.open) {
+        conn.send({ type: 'message_update', message: updatedMsg });
+      }
+      
+      setEditingMsg(null);
+      return;
+    }
 
     const newMessage: Message = { 
       id: `msg-${Date.now()}`, 
@@ -409,7 +464,7 @@ export default function App() {
                   key={m.id} 
                   msg={m} 
                   isMe={m.senderId === myProfile?.id} 
-                  onEdit={() => {}} 
+                  onEdit={setEditingMsg} 
                   onDelete={(id) => { if(window.confirm("Delete message?")) { dbService.deleteMessage(id); setMessages(prev => prev.filter(x => x.id !== id)); }}} 
                 />
               ))}
@@ -430,6 +485,8 @@ export default function App() {
                   reader.readAsDataURL(file);
                 }
               }}
+              editingMsg={editingMsg}
+              onCancelEdit={() => setEditingMsg(null)}
             />
           </>
         ) : (
